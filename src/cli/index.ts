@@ -6,6 +6,7 @@ import { Command } from 'commander';
 import { buildInitCommand } from './commands/init.js';
 import { buildAgentCommand } from './commands/agent.js';
 import { buildRunCommand } from './commands/run.js';
+import { buildWorkflowCommand } from './commands/workflow.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -42,6 +43,7 @@ export function buildProgram(): Command {
   program.addCommand(buildInitCommand());
   program.addCommand(buildAgentCommand());
   program.addCommand(buildRunCommand());
+  program.addCommand(buildWorkflowCommand());
 
   return program;
 }

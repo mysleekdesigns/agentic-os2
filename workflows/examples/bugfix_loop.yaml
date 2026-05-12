@@ -1,0 +1,113 @@
+# bugfix_loop: plan -> approve -> patch -> (tests || lint) -> review -> approve.
+# Use this workflow to take a bug report through a guarded fix loop: a human
+# approval gate sits in front of any disk-writing patch step, tests and lint run
+# in parallel after the patch, and a final human approval gates the "merge".
+
+id: bugfix-loop
+version: 1
+description: Plan, patch, test (unit + lint in parallel), review, and human-approve a bug fix.
+
+inputs:
+  - name: bug_description
+    type: string
+    description: Natural-language description of the bug, including repro steps if known.
+    required: true
+  - name: target_path
+    type: string
+    description: Path (file or directory) the fix is expected to touch.
+    required: true
+
+steps:
+  - kind: agent
+    id: plan
+    agent: code_reviewer
+    goal: |
+      Read the code under ${inputs.target_path} and produce a concrete fix plan
+      for this bug:
+
+      ${inputs.bug_description}
+
+      Output a structured plan with:
+        - summary: one paragraph describing the root cause and intended fix
+        - files_to_change: list of file paths you expect to modify
+        - tests_to_add_or_update: list of test names/files
+        - risk: "low" | "medium" | "high"
+      Do not modify any files in this step.
+
+  - kind: approval
+    id: approve-patch
+    prompt: |
+      Approve applying a code patch to ${inputs.target_path}?
+
+      Plan summary: ${outputs['plan'].summary}
+      Files to change: ${outputs['plan'].files_to_change}
+      Risk: ${outputs['plan'].risk}
+    risk: write
+
+  - kind: agent
+    id: patch
+    agent: doc_writer
+    goal: |
+      Apply the patch described in the approved plan. Write changes to disk under
+      ${inputs.target_path}. Keep the diff minimal and focused on the root cause
+      identified in the plan; do not refactor unrelated code. After applying,
+      output a short summary of the files touched and the key lines changed.
+
+      Approved plan:
+      ${outputs['plan']}
+
+  - kind: parallel
+    id: verify
+    branches:
+      - - kind: agent
+          id: unit-tests
+          agent: code_reviewer
+          goal: |
+            Run the project's unit test suite (the relevant subset for
+            ${inputs.target_path} if the full suite is too slow) and report
+            pass/fail counts, plus the full output of any failing tests. Do not
+            modify code; if tests fail, return the failure details so the next
+            iteration can react.
+          timeout_ms: 600000
+          retry:
+            max_attempts: 2
+            backoff_ms: 1000
+            multiplier: 2
+      - - kind: agent
+          id: lint
+          agent: code_reviewer
+          goal: |
+            Run the project's linter and type-checker against ${inputs.target_path}
+            (and any other files listed in ${outputs['plan'].files_to_change}).
+            Report every error and warning verbatim. Do not auto-fix.
+          timeout_ms: 300000
+
+  - kind: agent
+    id: review
+    agent: code_reviewer
+    goal: |
+      Review the applied patch for correctness, security, and adherence to the
+      original plan. Cross-check against the test and lint results below. Return
+      a structured verdict:
+        - verdict: "approved" | "changes_requested"
+        - notes: short string explaining required changes (empty if approved)
+
+      Patch summary:
+      ${outputs['patch']}
+
+      Unit test results:
+      ${outputs['unit-tests']}
+
+      Lint / type-check results:
+      ${outputs['lint']}
+
+  - kind: approval
+    id: approve-merge
+    prompt: |
+      Approve "merging" this bug fix?
+
+      Bug: ${inputs.bug_description}
+      Patch summary: ${outputs['patch']}
+      Reviewer verdict: ${outputs['review'].verdict}
+      Reviewer notes: ${outputs['review'].notes}
+    risk: write

@@ -1,0 +1,86 @@
+# deep_research: research a topic, write a report, review it, then publish or revise.
+# Use this workflow when you want a single-pass research -> write -> review pipeline
+# with an automatic conditional handoff: approved drafts get published, otherwise
+# the writer is asked to revise based on the reviewer's notes.
+
+id: deep-research
+version: 1
+description: Research a topic, draft a report, review it, then publish or revise based on the verdict.
+
+inputs:
+  - name: topic
+    type: string
+    description: The subject to research and write about.
+    required: true
+
+steps:
+  - kind: agent
+    id: research
+    agent: research_agent
+    goal: |
+      Research the topic: ${inputs.topic}.
+      Cover at least 3 reputable, independent sources. For each source, record the
+      URL, the publication/author, the date, and 2-4 sentence summary of the key
+      claims. Note any conflicts between sources. Output a structured set of
+      findings that a writer can turn into a report without further searching.
+    model: opus
+    timeout_ms: 600000
+    retry:
+      max_attempts: 2
+      backoff_ms: 1000
+      multiplier: 2
+
+  - kind: agent
+    id: write
+    agent: doc_writer
+    goal: |
+      Using the research findings below, write a clear, well-structured report on
+      "${inputs.topic}". The report should have: a 3-5 sentence executive summary,
+      a "Background" section, a "Key Findings" section with inline citations to
+      the sources, a "Tradeoffs / Open Questions" section, and a "References"
+      list. Prefer plain prose over bullet lists. Do not invent facts beyond the
+      research.
+
+      Research findings:
+      ${outputs['research']}
+
+  - kind: agent
+    id: review
+    agent: code_reviewer
+    goal: |
+      Review the draft report below for factual accuracy against the research,
+      structural quality, and tone. Check that every non-obvious claim has a
+      citation back to the research findings. Return a structured verdict with
+      two fields:
+        - verdict: "approved" or "changes_requested"
+        - notes: a short string explaining what to fix (empty if approved)
+
+      Draft report:
+      ${outputs['write']}
+
+      Original research findings (for fact-check):
+      ${outputs['research']}
+
+  - kind: conditional
+    id: route
+    when: "outputs['review'].verdict === 'approved'"
+    then:
+      - kind: agent
+        id: publish
+        agent: doc_writer
+        goal: |
+          The review approved the report. Finalize the report from
+          ${outputs['write']} for publication: tighten the executive summary,
+          ensure all references are formatted consistently, and output the final
+          publish-ready Markdown.
+    else:
+      - kind: agent
+        id: revise
+        agent: doc_writer
+        goal: |
+          The reviewer requested changes. Revise the draft from ${outputs['write']}
+          to address every point in the review notes below. Preserve the existing
+          structure and citations unless the notes specifically call them out.
+
+          Review notes:
+          ${outputs['review'].notes}

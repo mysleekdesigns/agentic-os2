@@ -736,25 +736,38 @@ fail-closed via `AgentOsConfigSchema` default), new
 
 ---
 
-### Phase 5 — Task / workflow orchestrator
+### Phase 5 — Task / workflow orchestrator ✅ COMPLETE (2026-05-12)
 
 **Outcome**: Multi-step workflows can be defined, run, paused, resumed,
 retried, and inspected.
 
-- [ ] Define workflow file format (YAML) supporting:
+- [x] Define workflow file format (YAML) supporting:
       sequential steps, parallel fan-out, conditional handoffs, approval gates,
       retries with backoff, timeouts, `awaiting_event` waits.
-- [ ] Implement durable executor: each step persisted to `steps` table;
+- [x] Implement durable executor: each step persisted to `steps` table;
       restart-safe; idempotency by step id.
-- [ ] Implement orchestrator-worker topology: a lead agent can spawn worker
+- [x] Implement orchestrator-worker topology: a lead agent can spawn worker
       subagents (matches Claude Code subagent semantics).
-- [ ] Add CLI: `workflow list`, `workflow run`, `workflow resume <run-id>`,
+- [x] Add CLI: `workflow list`, `workflow run`, `workflow resume <run-id>`,
       `workflow cancel <run-id>`, `workflow show <run-id>`.
-- [ ] Provide 2 example workflows: `deep_research` (research → write → review),
+- [x] Provide 2 example workflows: `deep_research` (research → write → review),
       `bugfix_loop` (plan → patch → test → review → approve).
 
-**Exit**: Killing the process mid-workflow then re-running `workflow resume`
-continues from the last completed step.
+**Exit (met)**: `tests/core/tasks/executor.test.ts > restart-safe (Phase 5 Exit
+criterion)` simulates a hard kill mid-workflow (closes the SQLite connection
+inside step 3 of 4) and asserts that `resumeWorkflow` against the same DB does
+not re-execute the two completed steps, runs only steps 3 and 4, and ends with
+`runs.status='succeeded'`. 276/276 tests pass with `ANTHROPIC_API_KEY` /
+`OPENAI_API_KEY` unset; `agent-os workflow list` enumerates the two example
+workflows without an API key. No new tables; reuses `runs`, `steps`,
+`approvals`, `events` per §2.4.
+
+**Artifacts shipped**: `src/core/tasks/{types,schema,loader,executor,orchestrator,index}.ts`,
+`src/cli/commands/workflow.ts` wired into `src/cli/index.ts`, slash command
+wrappers `.claude/commands/workflow-{list,run,resume,show}.md`,
+`workflows/examples/{deep_research,bugfix_loop}.yaml`, tests under
+`tests/core/tasks/{loader,executor,orchestrator}.test.ts` and
+`tests/cli/workflow.test.ts` (39 new tests).
 
 ---
 
@@ -1025,11 +1038,11 @@ Project-level quality bar:
 - [ ] Architecture document (§2 + `docs/architecture.md`)
 - [x] Data model (§2.4)
 - [x] Agent configuration schema (§2.6 + Zod)
-- [ ] Workflow configuration schema (Phase 5)
+- [x] Workflow configuration schema (Phase 5)
 - [x] Provider abstraction with Claude Code local mode first (Phase 3)
 - [ ] Optional API provider implementations (Phase 11)
 - [x] Tool/MCP permission model (Phase 4 + §1.7)
-- [ ] Task orchestration engine (Phase 5)
+- [x] Task orchestration engine (Phase 5)
 - [ ] Memory abstraction (Phase 7)
 - [ ] Human approval flow (Phase 6)
 - [ ] Observability/logging layer (Phase 8)
@@ -1037,7 +1050,7 @@ Project-level quality bar:
 - [ ] CLI interface (Phase 10)
 - [ ] Tests (Phase 14)
 - [x] Example agents (Phases 2 + 13)
-- [ ] Example workflows (Phases 5 + 13)
+- [ ] Example workflows (Phases 5 + 13) — Phase 5 portion done
 - [ ] Documentation for Claude Code Max users (Phase 13)
 - [ ] Documentation for API users (Phase 13)
 - [ ] Security notes and threat model (Phase 12)
