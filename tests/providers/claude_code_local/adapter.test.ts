@@ -273,6 +273,12 @@ describe('ClaudeCodeLocalProvider.run', () => {
         },
       }),
     );
+    // Disable pinning explicitly — without a config the new fail-closed default
+    // would drop this unchecksummed server.
+    await writeFile(
+      join(workspace, 'agent-os.config.yaml'),
+      'security:\n  pinned_mcp_servers: false\n',
+    );
 
     const { sdkImport, calls } = makeFakeSdk([{ type: 'result', subtype: 'success' }]);
     const provider = new ClaudeCodeLocalProvider({ sdkImport });

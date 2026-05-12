@@ -640,24 +640,99 @@ slash-command wrapper `.claude/commands/run.md`, new tests
 
 ---
 
-### Phase 4 — Tool / MCP permission layer
+### Phase 4 — Tool / MCP permission layer ✅ COMPLETE (2026-05-12)
 
 **Outcome**: Every tool call is policy-checked, risk-tagged, audited, and (when
 required) gated by approval.
 
-- [ ] Define tool risk tags: `read | write | network | shell | destructive`.
-- [ ] Build policy engine: per-agent allow-lists + global defaults + risk
+- [x] Define tool risk tags: `read | write | network | shell | destructive`.
+- [x] Build policy engine: per-agent allow-lists + global defaults + risk
       thresholds.
-- [ ] Implement PreToolUse hook (Claude Code hook + provider-level interceptor)
+- [x] Implement PreToolUse hook (Claude Code hook + provider-level interceptor)
       that calls the engine and either allows, denies, or queues for approval.
-- [ ] Log every `tool_call` row with: tool id, args hash, risk, decision,
+- [x] Log every `tool_call` row with: tool id, args hash, risk, decision,
       latency, result hash, error.
-- [ ] Add MCP server pinning: optional `checksum` in `.mcp.json` enforced by
+- [x] Add MCP server pinning: optional `checksum` in `.mcp.json` enforced by
       a `PreToolUse` hook.
-- [ ] Document the threat model touched here in `docs/security.md`.
+- [x] Document the threat model touched here in `docs/security.md`.
 
-**Exit**: Calling a disallowed tool is blocked with a clear message; calling
-a "write" tool triggers an approval prompt; audit log records both.
+**Exit (met)**: `npm test` green (237 tests across 27 files; +108 over Phase 3
+covering risk classifier, tool registry, policy engine, provider-stream
+interceptor, SQLite audit, TTY approval resolver, CLI policy wiring, MCP
+pinning, and the new `mcp-policy.sh` hook); `npm run typecheck`, `npm run
+lint`, and `npm run build` clean. Calling a denied tool yields an
+`approval_requested` followed by a synthetic `tool_result { isError: true }`;
+calling an `approval_required` tool blocks the run on the TTY resolver (or
+auto-rejects in non-interactive contexts); every decision lands in the
+`tool_calls` table with `risk`, `decision`, `rule`, `args_ref`, `result_ref`,
+`latency_ms`. `security.redact_secrets_in_logs` (schema default `true`) is
+honored by the auditor — args and results are run through a coarse vendor-key
+
+- secret-name redactor before blob-write. MCP server pinning is enforced on
+  both sides: the SDK loader (`src/providers/claude_code_local/mcp.ts`) drops
+  unchecksummed servers when `pinned_mcp_servers: true`, and the new
+  `.claude/hooks/mcp-policy.sh` PreToolUse hook independently blocks
+  `mcp__*` tool calls whose `.mcp.json` entries lack a matching
+  `command_sha256`. The hook correctly parses MCP server names that contain
+  underscores (e.g. `mcp__claude_ai_Gmail__authenticate`). Auditors:
+  `mcp-security-auditor` PASS (BLOCK on first pass → fixed three High findings:
+  underscored-server regex bypass in both `risk.ts` and the hook script, plus
+  unimplemented `redact_secrets_in_logs` — re-audit PASS);
+  `provider-capability-auditor` PASS WITH NITS (no API-key reads introduced;
+  interceptor and auditor are provider-agnostic; RunEvent union unchanged).
+  `verify-no-api-key` PASS with `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `CLAUDE_API_KEY` unset (npm test + typecheck + lint + build +
+  `agent-os --version` + `agent-os run --help` + `agent-os doctor` all green).
+
+**Artifacts shipped**: `src/core/tools/{risk.ts,registry.ts,policy.ts,interceptor.ts,audit.ts,index.ts}`,
+`src/cli/approvals.ts`, updated `src/cli/commands/run.ts` (wires interceptor +
+TTY approval resolver + SQLite auditor; adds `--no-audit` and `--auto-approve`
+flags and the additive `RunAgentInternals` injection bag), updated
+`src/providers/claude_code_local/{mcp.ts,adapter.ts}` (optional
+`command_sha256` pinning with `loadMcpServers({ pinned })` + missing-config
+fail-closed via `AgentOsConfigSchema` default), new
+`.claude/hooks/mcp-policy.sh` and matching `.claude/settings.json` entry,
+`docs/security.md` (threat model + risk tags + policy precedence + MCP pinning
+
+- audit log + Phase 12 follow-ups), new tests
+  `tests/core/tools/{risk,registry,policy,interceptor,audit}.test.ts`,
+  `tests/cli/{approvals,run-policy}.test.ts`, `tests/hooks/mcp-policy.test.ts`,
+  expanded `tests/providers/claude_code_local/mcp.test.ts` and `adapter.test.ts`.
+
+**Known follow-ups** (auditor nits + tracked, not blockers):
+
+- `src/core/tools/registry.ts` is exported but not yet consumed by `evaluate()`;
+  Phase 5/7 will thread `ToolRegistry` into `EvaluateInput` so providers can
+  register custom risk tags at startup.
+- `src/core/tools/audit.ts`'s `decision: 'approval_required'` path writes
+  `status: 'approved'` at insert-time, before the human resolver actually
+  votes; schema enum lacks an `awaiting_approval` state. Phase 5+ should
+  introduce one alongside workflow steps.
+- `SECRET_KEY_RE` (`audit.ts`) matches `auth` as a substring and so over-redacts
+  `author`, `oauth_state`, etc.; Phase 12 will move redaction rules into
+  config with proper word boundaries.
+- The coarse vendor-key list (`sk-…`, `AIza…`, `ghp_…`, `github_pat_…`,
+  `xox[abprs]-…`, `Bearer …`) misses AWS (`AKIA…`), GitLab (`glpat-…`), and
+  npm (`npm_…`) shapes; Phase 12 owns the configurable rule set.
+- `.claude/hooks/mcp-policy.sh` uses `jq ... 2>/dev/null || true` (silent on
+  jq missing) and a `grep -E pinned_mcp_servers:\s*true` YAML check; both are
+  documented tradeoffs (SDK-side Zod is authoritative). Phase 12 should add a
+  `command -v jq` precheck and a proper YAML parser.
+- Bare-token MCP commands (`node`, `python`) fall back to hashing the literal
+  command string; Phase 12 should resolve via `PATH` and hash the resolved
+  binary.
+- `loadPinnedFlag` returns `false` on YAML parse errors (vs. the new
+  schema-default `true` on ENOENT); justified in-code, but the asymmetry is
+  worth flattening once redact rules move into config.
+- `interceptProviderStream` does not audit provider-native
+  `approval_requested` events (e.g. SDK-side `permission_denied`); Phase 6
+  approval pipeline should align them with the auditor.
+- `claude_code_local` adapter's `approval_requested` mapping still passes
+  `args: undefined` (Phase 3 nit, unchanged); Phase 6's approval UX needs the
+  original tool input.
+- `agent` CLI uses `<workspaceRoot>/.agent-os/agent-os.sqlite` while the Phase 4
+  auditor uses `<workspaceRoot>/.agent-os/db.sqlite`; Phase 5 should reconcile
+  to a single workspace DB path.
 
 ---
 
@@ -953,7 +1028,7 @@ Project-level quality bar:
 - [ ] Workflow configuration schema (Phase 5)
 - [x] Provider abstraction with Claude Code local mode first (Phase 3)
 - [ ] Optional API provider implementations (Phase 11)
-- [ ] Tool/MCP permission model (Phase 4 + §1.7)
+- [x] Tool/MCP permission model (Phase 4 + §1.7)
 - [ ] Task orchestration engine (Phase 5)
 - [ ] Memory abstraction (Phase 7)
 - [ ] Human approval flow (Phase 6)

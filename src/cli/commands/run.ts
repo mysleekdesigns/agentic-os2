@@ -32,6 +32,16 @@ import {
   type ProviderId,
   type RunEvent,
 } from '../../core/providers/index.js';
+import {
+  interceptProviderStream,
+  type ApprovalResolver,
+  type ToolAuditor,
+} from '../../core/tools/interceptor.js';
+import { createSqliteAuditor, type SqliteAuditor } from '../../core/tools/audit.js';
+import { openDatabase } from '../../storage/db.js';
+import { runMigrations } from '../../storage/migrate.js';
+import { createBlobStore } from '../../storage/blobs.js';
+import { createTtyApprovalResolver } from '../approvals.js';
 import { renderEvent, renderJsonLine } from '../transcript.js';
 
 /** CLI flag bag for `agent-os run`. */
@@ -42,6 +52,23 @@ interface RunCliOptions {
   cwd?: string;
   provider?: string;
   color?: boolean; // Commander turns `--no-color` into `color: false`.
+  audit?: boolean; // Commander turns `--no-audit` into `audit: false`.
+  autoApprove?: boolean;
+}
+
+/**
+ * Optional injection hook for tests. Lets `runAgent` callers swap in a fake
+ * auditor or approval resolver without exercising the real SQLite/TTY paths.
+ */
+export interface RunAgentInternals {
+  auditorFactory?: (args: {
+    workspaceRoot: string;
+    agentId: string;
+    provider: string;
+    model: string;
+    redactSecrets: boolean;
+  }) => Promise<SqliteAuditor | ToolAuditor | null> | SqliteAuditor | ToolAuditor | null;
+  approvalResolverFactory?: (options: RunCliOptions) => ApprovalResolver;
 }
 
 /** Final exit-code mapping for the `done` event's `reason` field. */
@@ -78,6 +105,7 @@ export async function runAgent(
   agentId: string,
   goalParts: readonly string[],
   options: RunCliOptions,
+  internals: RunAgentInternals = {},
 ): Promise<number> {
   const goal = goalParts.join(' ').trim();
   if (goal.length === 0) {
@@ -151,32 +179,134 @@ export async function runAgent(
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
   };
 
+  // Resolve security config + auditor + approval resolver before the loop.
+  const config = loadConfig(undefined, { env: process.env });
+  const auditEnabled = options.audit !== false;
+  const providerName: string = providerId;
+  const modelName: string = input.model ?? '';
+
+  let auditor: SqliteAuditor | ToolAuditor | null = null;
+  let auditorIsFinalizable = false;
+  if (auditEnabled) {
+    try {
+      if (internals.auditorFactory) {
+        auditor = await internals.auditorFactory({
+          workspaceRoot,
+          agentId: def.frontmatter.id,
+          provider: providerName,
+          model: modelName,
+          redactSecrets: config.security.redact_secrets_in_logs,
+        });
+      } else {
+        auditor = await defaultAuditorFactory({
+          workspaceRoot,
+          agentId: def.frontmatter.id,
+          provider: providerName,
+          model: modelName,
+          redactSecrets: config.security.redact_secrets_in_logs,
+        });
+      }
+      auditorIsFinalizable = auditor !== null && isSqliteAuditor(auditor);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`agent-os run: audit setup failed: ${message}\n`);
+      auditor = null;
+      auditorIsFinalizable = false;
+    }
+  }
+
+  const approvalResolver: ApprovalResolver = internals.approvalResolverFactory
+    ? internals.approvalResolverFactory(options)
+    : createTtyApprovalResolver({
+        nonInteractive: options.autoApprove === true ? 'approve' : 'reject',
+      });
+
   let exitCode = 1;
   let sawDone = false;
+  let finalReason: 'completed' | 'cancelled' | 'error' = 'error';
   try {
+    const wrapped = interceptProviderStream(provider, input, {
+      agent: def.frontmatter,
+      security: config.security,
+      approvalResolver,
+      ...(auditor ? { auditor } : {}),
+    });
+
     // Backpressure: a `for await` loop pulls one event at a time. We do not
     // buffer the whole stream into memory.
-    for await (const event of provider.run(input)) {
+    for await (const event of wrapped) {
       writeEvent(event, { json, color });
       if (event.type === 'done') {
         sawDone = true;
+        finalReason = event.reason;
         exitCode = exitCodeFor(event.reason);
       }
     }
     if (!sawDone) {
       // Provider returned without emitting `done` — treat as an error.
       process.stderr.write('agent-os run: provider ended without a done event\n');
+      finalReason = 'error';
       exitCode = 1;
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`agent-os run: ${message}\n`);
+    finalReason = 'error';
     exitCode = 1;
   } finally {
     process.off('SIGINT', onSigint);
+    if (auditor && auditorIsFinalizable) {
+      try {
+        await (auditor as SqliteAuditor).finalize(finalReason);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`agent-os run: audit finalize failed: ${message}\n`);
+      }
+    }
   }
 
   return exitCode;
+}
+
+/** Type-guard for the SQLite-backed auditor's `finalize` capability. */
+function isSqliteAuditor(a: ToolAuditor | SqliteAuditor): a is SqliteAuditor {
+  return typeof (a as Partial<SqliteAuditor>).finalize === 'function';
+}
+
+/**
+ * Default auditor factory. Opens (or creates) `<workspaceRoot>/.agent-os/db.sqlite`,
+ * runs migrations idempotently, and returns a SQLite-backed auditor.
+ *
+ * Note: the database file lives at `db.sqlite` (not `agent-os.sqlite`) per the
+ * Phase 4 spec for this bundle — the `agent` command's path is a separate
+ * concern that Phase 5+ will reconcile.
+ */
+async function defaultAuditorFactory(args: {
+  workspaceRoot: string;
+  agentId: string;
+  provider: string;
+  model: string;
+  redactSecrets?: boolean;
+}): Promise<SqliteAuditor> {
+  const dbDir = join(args.workspaceRoot, '.agent-os');
+  const dbPath = join(dbDir, 'db.sqlite');
+  const blobsRoot = join(dbDir, 'blobs');
+  const db = openDatabase(dbPath);
+  try {
+    await runMigrations(db, { log: () => undefined });
+  } catch (err) {
+    db.$sqlite.close();
+    throw err;
+  }
+  const blobs = createBlobStore({ root: blobsRoot });
+  return createSqliteAuditor({
+    db,
+    blobs,
+    agentId: args.agentId,
+    provider: args.provider,
+    model: args.model,
+    ...(args.redactSecrets !== undefined ? { redactSecrets: args.redactSecrets } : {}),
+  });
 }
 
 /** Write a single `RunEvent` to stdout in the selected format. */
@@ -197,6 +327,8 @@ export function buildRunCommand(): Command {
     .option('--cwd <dir>', "Pass through as the run's working directory")
     .option('--provider <id>', "Override the agent's declared provider")
     .option('--no-color', 'Disable ANSI colour output')
+    .option('--no-audit', 'Skip writing tool_calls to the SQLite audit log')
+    .option('--auto-approve', 'Auto-approve approval_required tools (explicit override)', false)
     .action(async (agentId: string, goal: string[], options: RunCliOptions) => {
       let code: number;
       try {

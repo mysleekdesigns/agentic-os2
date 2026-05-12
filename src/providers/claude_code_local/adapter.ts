@@ -21,6 +21,11 @@
  * so a minor SDK version bump that adds new message subtypes is tolerated.
  */
 
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { loadConfig } from '../../config/index.js';
+import { AgentOsConfigSchema } from '../../config/schema.js';
 import { defaultCapabilitiesFor } from '../../core/providers/index.js';
 import type {
   AgentRunInput,
@@ -83,7 +88,13 @@ async function* runImpl(
   const signal = input.signal;
 
   // Resolve MCP servers — caller wins, otherwise fall back to .mcp.json.
-  const mcpServers = input.mcpServers ?? (await safeLoadMcpServers(input.workspaceRoot));
+  // Phase 4: honour `security.pinned_mcp_servers` from the workspace config so
+  // unsigned servers are dropped before they reach the SDK. When the config is
+  // absent (e.g. tests, ad-hoc workspaces) we default to permissive — pinning
+  // is opt-in, declared in config.
+  const pinned = loadPinnedFlag(input.workspaceRoot);
+  const mcpServers =
+    input.mcpServers ?? (await safeLoadMcpServers(input.workspaceRoot, { pinned }));
 
   // Compose the prompt: user goal goes through `prompt`, the agent's body
   // becomes the system prompt via `appendSystemPrompt` so the SDK's own
@@ -211,11 +222,36 @@ async function tryInterrupt(
   }
 }
 
-async function safeLoadMcpServers(workspaceRoot: string): Promise<Record<string, McpServerConfig>> {
+async function safeLoadMcpServers(
+  workspaceRoot: string,
+  opts: { pinned: boolean },
+): Promise<Record<string, McpServerConfig>> {
   try {
-    return await loadMcpServers(workspaceRoot);
+    return await loadMcpServers(workspaceRoot, opts);
   } catch {
     return {};
+  }
+}
+
+/**
+ * Read `security.pinned_mcp_servers` from the workspace's config.
+ *
+ * Missing config file → fall back to the schema default (`true`) so that an
+ * operator who deletes `agent-os.config.yaml` cannot silently downgrade pinning
+ * on both enforcement paths at once. Parse failures still fall back to `false`
+ * — failing closed there would brick adapter tests against malformed configs
+ * and produce a worse error than the SDK loader's own validation. The hook-side
+ * enforcement remains the second line of defense for any config-loading bypass.
+ */
+function loadPinnedFlag(workspaceRoot: string): boolean {
+  const configPath = resolve(workspaceRoot, 'agent-os.config.yaml');
+  if (!existsSync(configPath)) {
+    return AgentOsConfigSchema.parse({}).security.pinned_mcp_servers;
+  }
+  try {
+    return loadConfig(configPath).security.pinned_mcp_servers;
+  } catch {
+    return false;
   }
 }
 
