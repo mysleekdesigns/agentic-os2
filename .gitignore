@@ -1,0 +1,84 @@
+# ---- Secrets & local config ----
+.env
+.env.*
+!.env.example
+.mcp.json
+!.mcp.example.json
+*.pem
+*.key
+*.crt
+secrets/
+.secrets/
+
+# ---- Node / TypeScript ----
+node_modules/
+dist/
+build/
+out/
+.next/
+.turbo/
+.cache/
+.parcel-cache/
+.swc/
+*.tsbuildinfo
+.npm/
+.yarn/
+.pnpm-store/
+.yarn-error.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Bun ----
+.bun/
+bun.lockb
+
+# ---- Agent OS runtime artifacts ----
+.agent-os/
+cache/
+jobs/
+snapshots/
+webhooks/
+logs/
+blobs/
+runs/
+traces/
+memory/local/
+evals/results/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-journal
+
+# ---- Claude Code local state ----
+.claude/settings.local.json
+.claude/projects/
+.claude/statsig/
+.claude/todos/
+.claude/shell-snapshots/
+.claude/agent-memory-local/
+.claude/tmp/
+
+# ---- Editor / OS ----
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+*.iml
+
+# ---- Test / coverage ----
+coverage/
+.nyc_output/
+.vitest-cache/
+.jest-cache/
+
+# ---- Logs ----
+*.log
+logs/
