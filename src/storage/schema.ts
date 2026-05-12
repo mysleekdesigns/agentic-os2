@@ -34,7 +34,17 @@ export type RiskLevel = 'read' | 'write' | 'network' | 'shell' | 'destructive';
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
 
-export type MemoryScope = 'global' | 'agent' | 'run';
+/**
+ * Memory scopes are arbitrary strings as of Phase 7 (PRD §3 Phase 7). Agents
+ * may declare their own named scopes via `memory.read` / `memory.write` in
+ * their YAML frontmatter. `WELL_KNOWN_SCOPES` is the canonical set referenced
+ * by `agent-os.config.yaml.memory.default_scopes` and is exported so callers
+ * can typo-check the common cases without locking arbitrary scopes out.
+ */
+export type MemoryScope = string;
+
+export const WELL_KNOWN_SCOPES = ['session', 'agent', 'project', 'user_preferences'] as const;
+export type WellKnownMemoryScope = (typeof WELL_KNOWN_SCOPES)[number];
 
 // ---------------------------------------------------------------------------
 // Tables
@@ -140,6 +150,15 @@ export const memory = sqliteTable('memory', {
   embeddingId: text('embedding_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  // Tombstone marker (Phase 7). NULL = live; non-NULL unix epoch seconds =
+  // logically deleted. Rows are kept (deletes are non-destructive per PRD
+  // §3 Phase 7) so the diff chain and audit history stay intact.
+  deletedAt: integer('deleted_at', { mode: 'timestamp' }),
+  // Monotonic revision counter. 1 on insert, increments on every update.
+  revision: integer('revision').notNull().default(1),
+  // sha256 of the prior value blob; null on the initial revision. The diff
+  // chain is the audit trail for "updates require a real prior value".
+  previousValueRef: text('previous_value_ref'),
 });
 
 /**

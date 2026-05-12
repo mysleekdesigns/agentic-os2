@@ -813,26 +813,50 @@ use the queue API; tests
 
 ---
 
-### Phase 7 — Memory system
+### Phase 7 — Memory system ✅ COMPLETE (2026-05-12)
 
 **Outcome**: Agents have scoped, inspectable memory with explicit read/write
 policies; no uncontrolled writes.
 
-- [ ] Implement scopes: `session`, `agent`, `project`, `user_preferences`,
+- [x] Implement scopes: `session`, `agent`, `project`, `user_preferences`,
       plus arbitrary named scopes declared in agent YAML.
-- [ ] Storage: file-backed `memory/<scope>/*.md` for human-readable memories;
+- [x] Storage: file-backed `memory/<scope>/*.md` for human-readable memories;
       SQLite index for lookup; sqlite-vec for semantic search (optional).
-- [ ] Enforce per-agent `memory.read` / `memory.write` allow-lists at the
+- [x] Enforce per-agent `memory.read` / `memory.write` allow-lists at the
       provider boundary.
-- [ ] CLI: `memory list <scope>`, `memory show <id>`, `memory write <scope>
+- [x] CLI: `memory list <scope>`, `memory show <id>`, `memory write <scope>
 <key>`, `memory rm <id>`, `memory search "<query>" [--scope ...]`.
-- [ ] Document write policy: append by default; updates require diff; deletes
+- [x] Document write policy: append by default; updates require diff; deletes
       are tombstoned, not destructive.
-- [ ] Provide a `MEMORY.md` index pattern compatible with Claude Code's
+- [x] Provide a `MEMORY.md` index pattern compatible with Claude Code's
       conversation context loading.
 
-**Exit**: An agent without `memory.write: notes` cannot create a `notes`
-memory even if it tries; the attempt is logged.
+**Exit (met)**: `tests/core/memory/exit-phase7.test.ts` proves the criterion
+directly — an agent with `memory.write: ['research_notes']` attempting a
+`write` against scope `notes` throws `MemoryPolicyDenied`, a
+`memory.denied` event is logged with `agent_id`/`action='write'`/
+`scope='notes'`/`reason`, and the gated wrapper aborts before any row,
+blob, or file is created. 373/373 tests pass with `ANTHROPIC_API_KEY` /
+`OPENAI_API_KEY` unset. Memory bodies are stored content-addressed in
+`blobs/`; deletes are tombstoned via `deleted_at` (row + blob retained);
+updates require an explicit `diffNote` and bump the `revision` chain via
+`previous_value_ref`. Auditors: drizzle-schema-reviewer PASS WITH NITS
+(scope is now `string`; `WELL_KNOWN_SCOPES` exported but not enforced at
+write time); mcp-security-auditor PASS WITH NITS (Medium: `readMemoryValue`
+doesn't honour `deleted_at` — not exploitable via current CLI but should
+gate before Phase 8 wires programmatic callers; Low: CLI without
+`--agent-id` is implicitly trusted per Phase 12 TODO).
+
+**Artifacts shipped**: `drizzle/migrations/0004_memory_phase7.sql` (table
+rebuild dropping the scope CHECK; adds `deleted_at`/`revision`/
+`previous_value_ref`); `src/core/memory/{types,files,policy,index}.ts`
+(engine, file-backed storage, per-agent policy enforcement, MEMORY.md
+refresh, lexical+semantic search); `src/cli/commands/memory.ts` wired into
+`src/cli/index.ts`; slash command wrappers `.claude/commands/memory-{list,
+show,write,search}.md`; `agents/templates/MEMORY.md` template; `docs/
+memory.md` (write policy + diff chain + tombstones + scopes); tests
+`tests/core/memory/{engine,files,policy,search,exit-phase7}.test.ts` and
+`tests/cli/memory-commands.test.ts` (49 new tests).
 
 ---
 
@@ -1066,7 +1090,7 @@ Project-level quality bar:
 - [ ] Optional API provider implementations (Phase 11)
 - [x] Tool/MCP permission model (Phase 4 + §1.7)
 - [x] Task orchestration engine (Phase 5)
-- [ ] Memory abstraction (Phase 7)
+- [x] Memory abstraction (Phase 7)
 - [x] Human approval flow (Phase 6)
 - [ ] Observability/logging layer (Phase 8)
 - [ ] Eval framework (Phase 9)
