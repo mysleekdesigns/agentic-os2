@@ -1,0 +1,46 @@
+# agent-os.config.yaml
+runtime:
+  default_provider: claude_code_local
+  storage: local_sqlite
+  workspace_root: .
+  require_approval_for_risky_tools: true
+
+providers:
+  claude_code_local:
+    enabled: true
+    requires_api_key: false
+    sdk: "@anthropic-ai/claude-agent-sdk"
+  anthropic_api:
+    enabled: false
+    api_key_env: ANTHROPIC_API_KEY
+  openai_api:
+    enabled: false
+    api_key_env: OPENAI_API_KEY
+
+security:
+  default_tool_policy: deny
+  risk_levels:
+    read: allow
+    write: approval_required
+    network: approval_required
+    shell: approval_required
+    destructive: deny
+  pinned_mcp_servers: true       # require checksum match
+  redact_secrets_in_logs: true
+
+memory:
+  enabled: true
+  storage: local
+  semantic_search: optional      # sqlite-vec
+  default_scopes: [project, user_preferences]
+
+observability:
+  local_logs: true
+  traces: true
+  otlp_exporter:
+    enabled: false
+    endpoint: ""
+
+approvals:
+  channels: [cli]                # later: web, slack, github
+  default_ttl_minutes: 60

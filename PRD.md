@@ -425,19 +425,21 @@ directly when running inside the CLI.
 Each phase has an outcome, scope, checklist, and exit criteria. Phases are
 ordered by dependency, not necessarily by calendar.
 
-### Phase 0 — Foundation & repository setup
+### Phase 0 — Foundation & repository setup ✅ COMPLETE (2026-05-12)
 
 **Outcome**: Clean TypeScript repo, lint/format, baseline docs, decision log.
 
-- [ ] Initialize TypeScript project (Node 20+; Bun supported but not required).
-- [ ] Add `package.json`, `tsconfig.json`, ESLint, Prettier, Vitest.
-- [ ] Add `agent-os.config.yaml` skeleton + Zod schema.
-- [ ] Add `docs/architecture.md` stub with diagram from §2.
-- [ ] Add `docs/decisions/0001-stack.md` recording TypeScript choice.
-- [ ] Add `.gitignore` entries for `cache/`, `logs/`, `**/blobs/`, `.env`.
-- [ ] Confirm `.mcp.json` Crawlforge entry works inside Claude Code.
+- [x] Initialize TypeScript project (Node 20+; Bun supported but not required).
+- [x] Add `package.json`, `tsconfig.json`, ESLint, Prettier, Vitest.
+- [x] Add `agent-os.config.yaml` skeleton + Zod schema (`src/config/schema.ts`, `src/config/index.ts`).
+- [x] Add `docs/architecture.md` stub with diagram from §2.
+- [x] Add `docs/decisions/0001-stack.md` recording TypeScript choice.
+- [x] `.gitignore` already covers `cache/`, `logs/`, `blobs/`, `.env` (and more); verified.
+- [x] Confirmed `.mcp.json` Crawlforge entry is present and unchanged.
 
-**Exit**: `npm test` green; empty CLI binary runs `agent-os --version`.
+**Exit (met)**: `npm test` green (3 tests across `tests/cli.test.ts` and `tests/config.test.ts`); `node dist/cli/index.js --version` prints `0.0.1`; `npm run typecheck` and `npm run lint` clean.
+
+**Artifacts shipped**: `package.json`, `tsconfig.json`, `.eslintrc.cjs`, `.prettierrc.json`, `vitest.config.ts`, `.nvmrc`, `src/cli/index.ts` (with `--version` and `doctor` placeholder), `src/config/{schema.ts,index.ts}`, `agent-os.config.yaml`, `docs/architecture.md`, `docs/decisions/0001-stack.md`, rewritten `README.md`.
 
 ---
 
