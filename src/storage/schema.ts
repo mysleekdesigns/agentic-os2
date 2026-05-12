@@ -96,6 +96,19 @@ export const toolCalls = sqliteTable('tool_calls', {
   status: text('status').$type<ToolCallStatus>().notNull(),
 });
 
+/**
+ * Approval queue (PRD §3 Phase 6).
+ *
+ * TTL semantics: `requestedAt` (NOT NULL) records when the approval was
+ * requested; `expiresAt` (NULL = never expires) records the deadline. Expiry
+ * is lazy — readers can filter pending rows whose `expiresAt <= now()` as
+ * "effectively expired"; only `expireDueRequests` actually transitions them.
+ *
+ * Revise semantics: a `revise` decision keeps `status='pending'` but writes
+ * `revisedAction` + `note` + `decidedBy` + `decidedAt`, allowing a subsequent
+ * `approve` or `reject` to act on the revised action. There is no `revised`
+ * status; only the original four (pending/approved/rejected/expired).
+ */
 export const approvals = sqliteTable('approvals', {
   id: text('id').primaryKey(),
   runId: text('run_id').references(() => runs.id),
@@ -103,9 +116,19 @@ export const approvals = sqliteTable('approvals', {
   requestedBy: text('requested_by').notNull(),
   action: text('action').notNull(),
   status: text('status').$type<ApprovalStatus>().notNull(),
+  // requested_at is NOT NULL at the SQL layer with DEFAULT 0. We attach a
+  // Drizzle-side default (epoch 0) so legacy callers (Phase 5 executor) that
+  // omit the field still satisfy the NOT NULL constraint; new approval-queue
+  // code paths always pass a real timestamp.
+  requestedAt: integer('requested_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date(0)),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }),
   decidedBy: text('decided_by'),
   decidedAt: integer('decided_at', { mode: 'timestamp' }),
   reason: text('reason'),
+  note: text('note'),
+  revisedAction: text('revised_action'),
 });
 
 export const memory = sqliteTable('memory', {

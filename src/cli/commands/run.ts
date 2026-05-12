@@ -38,7 +38,7 @@ import {
   type ToolAuditor,
 } from '../../core/tools/interceptor.js';
 import { createSqliteAuditor, type SqliteAuditor } from '../../core/tools/audit.js';
-import { openDatabase } from '../../storage/db.js';
+import { openDatabase, type AgentOsDb } from '../../storage/db.js';
 import { runMigrations } from '../../storage/migrate.js';
 import { createBlobStore } from '../../storage/blobs.js';
 import { createTtyApprovalResolver } from '../approvals.js';
@@ -54,6 +54,13 @@ interface RunCliOptions {
   color?: boolean; // Commander turns `--no-color` into `color: false`.
   audit?: boolean; // Commander turns `--no-audit` into `audit: false`.
   autoApprove?: boolean;
+  /**
+   * Phase 6: route approval_required tool calls through the persistent
+   * approval queue (`approvals` table) instead of asking the inline resolver.
+   * The first gated tool call causes the run to exit with a message pointing
+   * the user at `agent-os approvals list`.
+   */
+  queueApprovals?: boolean;
 }
 
 /**
@@ -221,6 +228,27 @@ export async function runAgent(
         nonInteractive: options.autoApprove === true ? 'approve' : 'reject',
       });
 
+  // Phase 6: --queue-approvals routes approval_required tool calls through
+  // the persistent approval queue instead of asking the inline resolver.
+  // We open a dedicated DB handle so the queue path works even when audit
+  // is disabled. Closed in the `finally` block below.
+  const queueApprovals = options.queueApprovals === true;
+  let queueDb: AgentOsDb | null = null;
+  let queueDbCloseOnFinally = false;
+  let approvalsQueued = 0;
+  let queueDefaultTtlSeconds: number | null = null;
+  if (queueApprovals) {
+    try {
+      queueDb = await openOrInitWorkspaceDb(workspaceRoot);
+      queueDbCloseOnFinally = true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`agent-os run: --queue-approvals setup failed: ${message}\n`);
+      return 1;
+    }
+    queueDefaultTtlSeconds = (config.approvals.default_ttl_minutes ?? 60) * 60;
+  }
+
   let exitCode = 1;
   let sawDone = false;
   let finalReason: 'completed' | 'cancelled' | 'error' = 'error';
@@ -230,12 +258,25 @@ export async function runAgent(
       security: config.security,
       approvalResolver,
       ...(auditor ? { auditor } : {}),
+      ...(queueApprovals && queueDb
+        ? {
+            mode: 'queue' as const,
+            queue: {
+              db: queueDb,
+              requestedBy: `agent:${def.frontmatter.id}`,
+              defaultTtlSeconds: queueDefaultTtlSeconds,
+            },
+          }
+        : {}),
     });
 
     // Backpressure: a `for await` loop pulls one event at a time. We do not
     // buffer the whole stream into memory.
     for await (const event of wrapped) {
       writeEvent(event, { json, color });
+      if (queueApprovals && event.type === 'approval_requested') {
+        approvalsQueued += 1;
+      }
       if (event.type === 'done') {
         sawDone = true;
         finalReason = event.reason;
@@ -247,6 +288,18 @@ export async function runAgent(
       process.stderr.write('agent-os run: provider ended without a done event\n');
       finalReason = 'error';
       exitCode = 1;
+    }
+    if (queueApprovals && approvalsQueued > 0) {
+      // Surface the pause to stderr regardless of exit code — the queued
+      // approvals are the user's signal that the run is parked.
+      process.stderr.write(
+        `agent-os run: paused — ${approvalsQueued} approval${
+          approvalsQueued === 1 ? '' : 's'
+        } queued. See \`agent-os approvals list\`.\n`,
+      );
+      if (exitCode === 0) {
+        exitCode = 1;
+      }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -261,6 +314,13 @@ export async function runAgent(
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         process.stderr.write(`agent-os run: audit finalize failed: ${message}\n`);
+      }
+    }
+    if (queueDbCloseOnFinally && queueDb) {
+      try {
+        queueDb.$sqlite.close();
+      } catch {
+        // Ignore close errors — best-effort cleanup.
       }
     }
   }
@@ -309,6 +369,24 @@ async function defaultAuditorFactory(args: {
   });
 }
 
+/**
+ * Open (or create) the workspace's `.agent-os/db.sqlite` and apply
+ * migrations. Returns a Drizzle handle that the caller is responsible for
+ * closing. Used by `--queue-approvals` to persist queue rows.
+ */
+async function openOrInitWorkspaceDb(workspaceRoot: string): Promise<AgentOsDb> {
+  const dbDir = join(workspaceRoot, '.agent-os');
+  const dbPath = join(dbDir, 'db.sqlite');
+  const db = openDatabase(dbPath);
+  try {
+    await runMigrations(db, { log: () => undefined });
+  } catch (err) {
+    db.$sqlite.close();
+    throw err;
+  }
+  return db;
+}
+
 /** Write a single `RunEvent` to stdout in the selected format. */
 function writeEvent(event: RunEvent, opts: { json: boolean; color: boolean }): void {
   const line = opts.json ? renderJsonLine(event) : renderEvent(event, { color: opts.color });
@@ -329,6 +407,11 @@ export function buildRunCommand(): Command {
     .option('--no-color', 'Disable ANSI colour output')
     .option('--no-audit', 'Skip writing tool_calls to the SQLite audit log')
     .option('--auto-approve', 'Auto-approve approval_required tools (explicit override)', false)
+    .option(
+      '--queue-approvals',
+      'Persist approval_required tool calls to the queue instead of asking inline (pauses the run)',
+      false,
+    )
     .action(async (agentId: string, goal: string[], options: RunCliOptions) => {
       let code: number;
       try {

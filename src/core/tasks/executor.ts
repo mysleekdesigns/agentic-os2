@@ -17,7 +17,23 @@
  * When the workflow is paused (approval or wait_event), we mark the run as
  * `status='pending'` and leave the corresponding step in `status='running'`
  * — the step row plus the pending approval / awaited event together encode
- * the wait. `resumeWorkflow` reloads the state from the DB:
+ * the wait.
+ *
+ * Awaiting-approval representation (Phase 6)
+ * ------------------------------------------
+ * There is NO new run status. A run is "awaiting_approval" iff:
+ *   `runs.status = 'pending'`
+ *   AND ∃ an `approvals` row with `run_id = runs.id AND status = 'pending'`.
+ *
+ * Approval rows are written via the queue API in `src/core/approvals/` so
+ * every transition (request, approve, reject, revise, expire) emits an
+ * `events` row — that's the audit trail. The executor itself does NOT poll
+ * for a decision: when it encounters a still-pending approval it emits
+ * `workflow_paused` and exits the async iterator. `resumeWorkflow` is the
+ * caller's responsibility — typically invoked from the approvals CLI after
+ * `decideRequest` flips the row.
+ *
+ * `resumeWorkflow` reloads the state from the DB:
  *   1. Walks completed steps into `WorkflowRunState.completedStepIds` and
  *      rehydrates their outputs from blobs.
  *   2. Finds the first not-completed step in DAG order.
@@ -33,12 +49,16 @@
  * `ProviderAdapter` interface so tests can fake it without any env vars.
  */
 
-import { randomUUID } from 'node:crypto';
 import { and, eq, gte } from 'drizzle-orm';
 
 import type { AgentOsDb } from '../../storage/db.js';
 import type { BlobStore } from '../../storage/blobs.js';
-import { approvals, events, runs, steps } from '../../storage/schema.js';
+import { approvals as schemaApprovals, events, runs, steps } from '../../storage/schema.js';
+import {
+  createRequest as createApprovalRequest,
+  decideRequest as decideApprovalRequest,
+  getRequest as getApprovalRequest,
+} from '../approvals/index.js';
 import type {
   AgentStepDef,
   ApprovalStepDef,
@@ -627,26 +647,34 @@ async function executeConditionalStep(step: ConditionalStepDef, ctx: ExecutorCtx
 async function executeApprovalStep(step: ApprovalStepDef, ctx: ExecutorCtx): Promise<void> {
   const dbStepId = scopedStepId(ctx.runId, step.id);
 
-  // Find an existing approval row (resume case) or insert a new one.
-  const existingApprovals = await ctx.db
-    .select()
-    .from(approvals)
-    .where(eq(approvals.stepId, dbStepId));
+  // Find an existing approval row (resume case). We query the `approvals`
+  // table directly here because the queue API exposes per-id lookup, not
+  // per-step. Once we have the id we round-trip through `getApprovalRequest`
+  // so any future changes to the row shape stay encapsulated.
+  const existingApprovalIds = await ctx.db
+    .select({ id: schemaApprovals.id })
+    .from(schemaApprovals)
+    .where(eq(schemaApprovals.stepId, dbStepId));
 
   let approvalId: string;
-  let stepStatus: 'fresh' | 'pending' = 'fresh';
 
-  if (existingApprovals.length === 0) {
-    approvalId = randomUUID();
+  if (existingApprovalIds.length === 0) {
+    // Fresh approval — persist via the queue so an `approval.requested`
+    // event is appended to the audit trail.
     await upsertStepRunning(ctx, step.id, 'approval', step.kind, null);
-    await ctx.db.insert(approvals).values({
-      id: approvalId,
+    const created = await createApprovalRequest({
+      db: ctx.db,
       runId: ctx.runId,
       stepId: dbStepId,
       requestedBy: 'workflow',
       action: step.prompt,
-      status: 'pending',
+      reason: `risk=${step.risk}`,
+      // TTL: workflow definitions do not (yet) carry explicit TTLs at this
+      // layer. The queue policies module owns TTL resolution; the executor
+      // passes `undefined` so `defaultTtlSeconds` (when provided) wins, or
+      // the queue stores `expires_at=null` (never expires) otherwise.
     });
+    approvalId = created.id;
     ctx.emit({
       type: 'step_started',
       runId: ctx.runId,
@@ -655,11 +683,11 @@ async function executeApprovalStep(step: ApprovalStepDef, ctx: ExecutorCtx): Pro
       kind: 'approval',
     });
   } else {
-    const row = existingApprovals[0]!;
-    approvalId = row.id;
-    stepStatus = 'pending';
+    approvalId = existingApprovalIds[0]!.id;
+    const existing = await getApprovalRequest(approvalId, { db: ctx.db });
 
-    if (row.status === 'approved') {
+    // Decision already in — fast-path on resume.
+    if (existing && existing.status === 'approved') {
       await markStepSucceeded(ctx, dbStepId, null);
       ctx.state.completedStepIds.add(step.id);
       ctx.state.outputs.set(step.id, { approved: true });
@@ -673,17 +701,21 @@ async function executeApprovalStep(step: ApprovalStepDef, ctx: ExecutorCtx): Pro
       });
       return;
     }
-    if (row.status === 'rejected') {
-      await markStepFailed(ctx, dbStepId, row.reason ?? 'approval rejected');
+    if (existing && (existing.status === 'rejected' || existing.status === 'expired')) {
+      const reason =
+        existing.status === 'expired'
+          ? 'approval expired'
+          : (existing.note ?? existing.reason ?? 'approval rejected');
+      await markStepFailed(ctx, dbStepId, reason);
       ctx.emit({
         type: 'step_failed',
         runId: ctx.runId,
         timestamp: Date.now(),
         stepId: step.id,
         kind: 'approval',
-        error: row.reason ?? 'approval rejected',
+        error: reason,
       });
-      throw new StepFailure(row.reason ?? 'approval rejected', step.id);
+      throw new StepFailure(reason, step.id);
     }
   }
 
@@ -706,16 +738,26 @@ async function executeApprovalStep(step: ApprovalStepDef, ctx: ExecutorCtx): Pro
   });
 
   if (verdict === 'pending') {
-    // Park the run and exit; caller will resume later.
+    // Park the run and exit. The executor does NOT poll — the CLI / event
+    // bus will call `resumeWorkflow` after a decision flips the row.
     await ctx.db.update(runs).set({ status: 'pending' }).where(eq(runs.id, ctx.runId));
     throw new WorkflowPause('approval', step.id);
   }
 
   if (verdict === 'approve') {
-    await ctx.db
-      .update(approvals)
-      .set({ status: 'approved', decidedAt: new Date(), decidedBy: 'resolver' })
-      .where(eq(approvals.id, approvalId));
+    // Route through `decideApprovalRequest` so the audit log gets an
+    // `approval.approved` event. We only do this when the row is still
+    // pending — on resume after an out-of-band update, the fast-path above
+    // returns first.
+    const current = await getApprovalRequest(approvalId, { db: ctx.db });
+    if (current && current.status === 'pending') {
+      await decideApprovalRequest({
+        db: ctx.db,
+        approvalId,
+        verdict: 'approve',
+        decidedBy: 'resolver',
+      });
+    }
     await markStepSucceeded(ctx, dbStepId, null);
     ctx.state.completedStepIds.add(step.id);
     ctx.state.outputs.set(step.id, { approved: true });
@@ -730,15 +772,19 @@ async function executeApprovalStep(step: ApprovalStepDef, ctx: ExecutorCtx): Pro
     return;
   }
 
-  // reject
-  const reason = `approval rejected by resolver`;
-  await ctx.db
-    .update(approvals)
-    .set({ status: 'rejected', decidedAt: new Date(), decidedBy: 'resolver', reason })
-    .where(eq(approvals.id, approvalId));
+  // verdict === 'reject'
+  const reason = 'approval rejected by resolver';
+  const current = await getApprovalRequest(approvalId, { db: ctx.db });
+  if (current && current.status === 'pending') {
+    await decideApprovalRequest({
+      db: ctx.db,
+      approvalId,
+      verdict: 'reject',
+      decidedBy: 'resolver',
+      note: reason,
+    });
+  }
   await markStepFailed(ctx, dbStepId, reason);
-  // Mark step row context (in case stepStatus was 'pending').
-  void stepStatus;
   ctx.emit({
     type: 'step_failed',
     runId: ctx.runId,

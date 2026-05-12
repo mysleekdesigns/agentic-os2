@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { Command } from 'commander';
 import { buildInitCommand } from './commands/init.js';
 import { buildAgentCommand } from './commands/agent.js';
+import { buildApprovalsCommand } from './commands/approvals.js';
 import { buildRunCommand } from './commands/run.js';
 import { buildWorkflowCommand } from './commands/workflow.js';
 
@@ -44,6 +45,7 @@ export function buildProgram(): Command {
   program.addCommand(buildAgentCommand());
   program.addCommand(buildRunCommand());
   program.addCommand(buildWorkflowCommand());
+  program.addCommand(buildApprovalsCommand());
 
   return program;
 }

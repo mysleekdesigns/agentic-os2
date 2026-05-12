@@ -771,22 +771,45 @@ wrappers `.claude/commands/workflow-{list,run,resume,show}.md`,
 
 ---
 
-### Phase 6 — Human approval system
+### Phase 6 — Human approval system ✅ COMPLETE (2026-05-12)
 
 **Outcome**: Risky actions can be paused until a human approves, rejects, or
 revises them; decisions are auditable.
 
-- [ ] Implement approval queue in `approvals` table with TTL + expiration.
-- [ ] CLI: `agent-os approvals list`, `approvals show <id>`,
+- [x] Implement approval queue in `approvals` table with TTL + expiration.
+- [x] CLI: `agent-os approvals list`, `approvals show <id>`,
       `approvals approve|reject|revise <id> [--note ...]`.
-- [ ] Hook integration: when a tool/step is gated, the run enters
+- [x] Hook integration: when a tool/step is gated, the run enters
       `awaiting_approval`; the orchestrator does not poll — it resumes when
       an approval event lands.
-- [ ] Configurable policies (per agent, per tool, per workflow).
-- [ ] Audit log every decision with who/when/why.
+- [x] Configurable policies (per agent, per tool, per workflow).
+- [x] Audit log every decision with who/when/why.
 
-**Exit**: A workflow that writes a file pauses, shows up in `approvals list`,
-and resumes correctly on approve.
+**Exit (met)**: `tests/core/tasks/exit-phase6.test.ts` proves the criterion
+directly — a workflow with an `approval` step pauses, the approval appears
+in `listRequests`, `decideRequest({verdict:'approve'})` followed by
+`resumeWorkflow` finishes the run, and an `events` row of kind
+`approval.approved` is written. 324/324 tests pass with `ANTHROPIC_API_KEY`
+/ `OPENAI_API_KEY` unset. `awaiting_approval` is represented as
+`runs.status='pending'` plus a `pending` row in `approvals` — no new status
+value, no CHECK constraint change. Auditors: drizzle-schema-reviewer PASS
+WITH NITS (rollback block is a comment); mcp-security-auditor PASS WITH
+NITS (queue events don't yet honor `redact_secrets_in_logs`; TTL/decide
+race needs transactional gating) — both recorded as Phase 12 follow-ups.
+
+**Artifacts shipped**: `drizzle/migrations/0003_approvals_ttl.sql` adding
+`requested_at`/`expires_at`/`note`/`revised_action` to `approvals` plus
+`idx_approvals_expires_at`; `src/core/approvals/{types,index,policies}.ts`
+(queue + per-agent/per-tool/per-workflow policies + audit events);
+`src/cli/commands/approvals.ts` wired into `src/cli/index.ts`; slash command
+wrappers `.claude/commands/approvals-{list,show,approve,reject}.md`;
+`src/core/tools/interceptor.ts` gains `mode: 'inline' | 'queue'`;
+`src/cli/commands/run.ts` gains `--queue-approvals`; executor refactored to
+use the queue API; tests
+`tests/core/approvals/{queue,policies,policies-integration,audit-trail}.test.ts`,
+`tests/cli/approvals-commands.test.ts`, and
+`tests/core/tasks/{executor-approvals,exit-phase6}.test.ts`
+(48 new tests).
 
 ---
 
@@ -1044,7 +1067,7 @@ Project-level quality bar:
 - [x] Tool/MCP permission model (Phase 4 + §1.7)
 - [x] Task orchestration engine (Phase 5)
 - [ ] Memory abstraction (Phase 7)
-- [ ] Human approval flow (Phase 6)
+- [x] Human approval flow (Phase 6)
 - [ ] Observability/logging layer (Phase 8)
 - [ ] Eval framework (Phase 9)
 - [ ] CLI interface (Phase 10)

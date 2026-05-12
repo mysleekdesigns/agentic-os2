@@ -18,6 +18,8 @@ import { createHash } from 'node:crypto';
 import type { SecurityConfig } from '../../config/schema.js';
 import type { AgentFrontmatter } from '../agents/schema.js';
 import type { AgentRunInput, Provider, RunEvent } from '../providers/index.js';
+import type { AgentOsDb } from '../../storage/db.js';
+import { createRequest as createApprovalRequest } from '../approvals/index.js';
 import { evaluate, type PolicyDecision } from './policy.js';
 
 export interface ApprovalContext {
@@ -50,6 +52,36 @@ export interface ToolAuditor {
   }): Promise<void> | void;
 }
 
+/**
+ * How `approval_required` decisions are dispatched.
+ *
+ * - `'inline'` (default, Phase 4 behaviour): the interceptor calls the
+ *   provided `ApprovalResolver` synchronously and acts on the verdict.
+ * - `'queue'` (Phase 6): the interceptor persists the request to the
+ *   `approvals` table via `createRequest`, emits `approval_requested`, then
+ *   short-circuits with a synthetic deny-style `tool_result` carrying the
+ *   queued approval id. The caller (typically the workflow executor) is
+ *   responsible for pausing the run; the interceptor itself does NOT wait
+ *   for the decision and does NOT poll.
+ */
+export type ApprovalMode = 'inline' | 'queue';
+
+/**
+ * Required when `mode === 'queue'`. The interceptor uses these to persist
+ * approval rows and emit `approval.requested` audit events.
+ */
+export interface QueueApprovalOptions {
+  db: AgentOsDb;
+  /** Used as `requested_by` on the approval row. */
+  requestedBy: string;
+  /** Linked to `approvals.run_id`. */
+  runId?: string | null;
+  /** Linked to `approvals.step_id`. */
+  stepId?: string | null;
+  /** Fallback TTL when no per-tool/agent override applies. */
+  defaultTtlSeconds?: number | null;
+}
+
 export interface InterceptOptions {
   agent: Pick<AgentFrontmatter, 'id' | 'tools' | 'permissions'>;
   security: SecurityConfig;
@@ -57,6 +89,10 @@ export interface InterceptOptions {
   approvalResolver?: ApprovalResolver;
   /** Defaults to a no-op auditor when omitted. */
   auditor?: ToolAuditor;
+  /** Approval dispatch mode (default `'inline'`). */
+  mode?: ApprovalMode;
+  /** Required when `mode === 'queue'`. */
+  queue?: QueueApprovalOptions;
 }
 
 /**
@@ -109,6 +145,10 @@ export function interceptProviderStream(
 ): AsyncIterable<RunEvent> {
   const resolver: ApprovalResolver = opts.approvalResolver ?? (async () => 'reject');
   const auditor: ToolAuditor = opts.auditor ?? noopAuditor;
+  const mode: ApprovalMode = opts.mode ?? 'inline';
+  if (mode === 'queue' && !opts.queue) {
+    throw new Error('interceptProviderStream: mode="queue" requires queue options');
+  }
 
   // Per-tool-call bookkeeping so we can compute latency at result-time and
   // drop the provider's real tool_result when we've already emitted a synthetic one.
@@ -165,7 +205,51 @@ export function interceptProviderStream(
           continue;
         }
 
-        // approval_required: ask the resolver. We MUST NOT block the iterator
+        // approval_required.
+        //
+        // In `'queue'` mode we persist the request via `createRequest` (which
+        // emits an `approval.requested` event for the audit trail), surface
+        // the in-stream `approval_requested` event for renderers, then
+        // synthesize a deny-style `tool_result` carrying the queued approval
+        // id. The caller decides what to do — typically pause the workflow.
+        if (mode === 'queue') {
+          const q = opts.queue!;
+          const queued = await createApprovalRequest({
+            db: q.db,
+            requestedBy: q.requestedBy,
+            action: event.tool,
+            reason: decision.reason,
+            runId: q.runId ?? null,
+            stepId: q.stepId ?? null,
+            ...(q.defaultTtlSeconds !== undefined
+              ? { defaultTtlSeconds: q.defaultTtlSeconds }
+              : {}),
+          });
+          await auditor.onCall({
+            toolCallId: event.toolCallId,
+            tool: event.tool,
+            args: event.args,
+            risk: decision.risk,
+            decision: decision.outcome,
+            rule: decision.rule,
+            reason: decision.reason,
+            // No decidedBy yet — decision is pending in the queue.
+          });
+          yield syntheticApprovalRequested(event, decision.reason);
+          const syntheticTs = event.timestamp + 1;
+          const queuedReason = `approval queued — id=${queued.id}`;
+          yield syntheticDenyResult(event.toolCallId, queuedReason, syntheticTs);
+          suppressedResultIds.add(event.toolCallId);
+          await auditor.onResult({
+            toolCallId: event.toolCallId,
+            result: queuedReason,
+            isError: true,
+            latencyMs: 0,
+          });
+          continue;
+        }
+
+        // 'inline' mode: ask the resolver. We MUST NOT block the iterator
         // forever — the resolver is responsible for honouring any timeout.
         yield syntheticApprovalRequested(event, decision.reason);
         const verdict = await resolver({
