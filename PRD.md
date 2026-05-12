@@ -860,23 +860,41 @@ memory.md` (write policy + diff chain + tombstones + scopes); tests
 
 ---
 
-### Phase 8 — Observability
+### Phase 8 — Observability ✅ COMPLETE (2026-05-12)
 
 **Outcome**: Every run is traceable from start to finish; failed runs are
 debuggable; data is local by default and exportable to OTel.
 
-- [ ] Emit OTel-shaped spans per Anthropic GenAI semconv: `gen_ai.system`,
+- [x] Emit OTel-shaped spans per Anthropic GenAI semconv: `gen_ai.system`,
       `gen_ai.request.model`, `gen_ai.usage.*` (nullable for Max mode),
       tool spans, agent spans, retrieval spans.
-- [ ] Persist spans to `traces` table; render local timeline via
-      `agent-os run show <run-id>`.
-- [ ] Optional OTLP exporter (off by default; one config flag turns it on).
-- [ ] Searchable local log view: `agent-os logs [--agent ...] [--since ...]`.
-- [ ] Graceful degradation when cost/tokens are unavailable — UI shows "—"
+- [x] Persist spans to `traces` table; render local timeline via
+      `agent-os show <run-id>` (top-level rather than `run show <run-id>`;
+      `run` stayed a leaf to avoid breaking the Phase 3 surface).
+- [x] Optional OTLP exporter (off by default; one config flag turns it on).
+- [x] Searchable local log view: `agent-os logs [--agent ...] [--since ...]`.
+- [x] Graceful degradation when cost/tokens are unavailable — UI shows "—"
       rather than fabricating numbers.
 
-**Exit**: After a multi-step run, `run show` prints a tree of agent calls,
-tool calls, durations, and outcomes that matches reality.
+**Exit (met)**: `tests/cli/show.test.ts > Phase 8 Exit — show prints a tree
+matching reality after a multi-step run` seeds a workflow span with two
+agent children and two tool_call grandchildren each, drives
+`agent-os show --json`, and asserts span count, tree shape, per-node
+durations (`endTimeMs - startTimeMs`), and statuses. 422/422 tests pass
+with `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` unset. Span persistence is
+best-effort (errors swallowed via `errorLogger`); cost/tokens null →
+`formatNullableNumber` renders `"—"`. No applicable auditors (no schema,
+provider, MCP/security, or agent definition surfaces).
+
+**Artifacts shipped**: `src/core/observability/{types,spans,emitter,otlp,
+index}.ts` (OTel GenAI semconv span shapes, `createSpanEmitter`,
+hand-rolled OTLP/HTTP JSON exporter, `formatNullableNumber`,
+`createObservabilityFromConfig`); executor + interceptor instrumentation
+(`RunWorkflowOptions.emitter`, `InterceptOptions.emitter`); CLI commands
+`src/cli/commands/{show,logs}.ts` wired into `src/cli/index.ts`; slash
+command wrappers `.claude/commands/{show,logs}.md`; tests
+`tests/core/observability/{spans,emitter,executor-integration,otlp,format}
+.test.ts` and `tests/cli/{show,logs}.test.ts` (49 new tests).
 
 ---
 
@@ -1092,7 +1110,7 @@ Project-level quality bar:
 - [x] Task orchestration engine (Phase 5)
 - [x] Memory abstraction (Phase 7)
 - [x] Human approval flow (Phase 6)
-- [ ] Observability/logging layer (Phase 8)
+- [x] Observability/logging layer (Phase 8)
 - [ ] Eval framework (Phase 9)
 - [ ] CLI interface (Phase 10)
 - [ ] Tests (Phase 14)

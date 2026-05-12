@@ -20,6 +20,7 @@ import type { AgentFrontmatter } from '../agents/schema.js';
 import type { AgentRunInput, Provider, RunEvent } from '../providers/index.js';
 import type { AgentOsDb } from '../../storage/db.js';
 import { createRequest as createApprovalRequest } from '../approvals/index.js';
+import type { SpanContext, SpanEmitter } from '../observability/index.js';
 import { evaluate, type PolicyDecision } from './policy.js';
 
 export interface ApprovalContext {
@@ -93,6 +94,17 @@ export interface InterceptOptions {
   mode?: ApprovalMode;
   /** Required when `mode === 'queue'`. */
   queue?: QueueApprovalOptions;
+  /**
+   * Phase 8: optional span emitter. When supplied, every gated tool call gets
+   * a `tool_call` span with attributes describing the policy decision and a
+   * status mirroring the outcome (`ok` / `error` / `cancelled`). When absent,
+   * no spans are emitted — Phase 4/6 behaviour is preserved exactly.
+   */
+  emitter?: SpanEmitter;
+  /** Optional parent span context (typically the surrounding agent span). */
+  parentSpan?: SpanContext;
+  /** Run id stamped on emitted tool spans. Defaults to `''`. */
+  runId?: string;
 }
 
 /**
@@ -154,6 +166,46 @@ export function interceptProviderStream(
   // drop the provider's real tool_result when we've already emitted a synthetic one.
   const startedAt = new Map<string, number>();
   const suppressedResultIds = new Set<string>();
+  // Phase 8: per-tool-call span contexts so `tool_result` events can close
+  // the right span (or set an error status on it).
+  const toolSpans = new Map<string, SpanContext>();
+  const emitter = opts.emitter;
+  const runIdForSpans = opts.runId ?? '';
+
+  const startToolSpan = (
+    event: Extract<RunEvent, { type: 'tool_call' }>,
+    decision: PolicyDecision,
+  ): void => {
+    if (!emitter) return;
+    const ctx = emitter.start({
+      kind: 'tool_call',
+      name: `tool:${event.tool}`,
+      runId: runIdForSpans,
+      ...(opts.parentSpan ? { parent: opts.parentSpan } : {}),
+      attributes: {
+        'gen_ai.operation.name': 'tool_call',
+        'gen_ai.tool.name': event.tool,
+        'agent_os.tool': event.tool,
+        'agent_os.tool_call_id': event.toolCallId,
+        'agent_os.decision': decision.outcome,
+        'agent_os.risk': decision.risk,
+        'agent_os.policy_rule': decision.rule,
+      },
+    });
+    toolSpans.set(event.toolCallId, ctx);
+  };
+
+  const endToolSpan = (
+    toolCallId: string,
+    status: 'ok' | 'error' | 'cancelled',
+    extra?: Record<string, string | number | boolean | null>,
+  ): void => {
+    if (!emitter) return;
+    const ctx = toolSpans.get(toolCallId);
+    if (!ctx) return;
+    toolSpans.delete(toolCallId);
+    emitter.end(ctx, status, extra);
+  };
 
   async function* iterator(): AsyncGenerator<RunEvent, void, void> {
     for await (const event of provider.run(input)) {
@@ -167,6 +219,7 @@ export function interceptProviderStream(
 
         if (decision.outcome === 'allow') {
           startedAt.set(event.toolCallId, event.timestamp);
+          startToolSpan(event, decision);
           await auditor.onCall({
             toolCallId: event.toolCallId,
             tool: event.tool,
@@ -182,6 +235,7 @@ export function interceptProviderStream(
         }
 
         if (decision.outcome === 'deny') {
+          startToolSpan(event, decision);
           await auditor.onCall({
             toolCallId: event.toolCallId,
             tool: event.tool,
@@ -201,6 +255,10 @@ export function interceptProviderStream(
             result: decision.reason,
             isError: true,
             latencyMs: 0,
+          });
+          endToolSpan(event.toolCallId, 'error', {
+            'agent_os.tool.outcome': 'rejected',
+            'agent_os.error': decision.reason,
           });
           continue;
         }
@@ -225,6 +283,7 @@ export function interceptProviderStream(
               ? { defaultTtlSeconds: q.defaultTtlSeconds }
               : {}),
           });
+          startToolSpan(event, decision);
           await auditor.onCall({
             toolCallId: event.toolCallId,
             tool: event.tool,
@@ -246,11 +305,16 @@ export function interceptProviderStream(
             isError: true,
             latencyMs: 0,
           });
+          endToolSpan(event.toolCallId, 'cancelled', {
+            'agent_os.tool.outcome': 'queued',
+            'agent_os.approval_id': queued.id,
+          });
           continue;
         }
 
         // 'inline' mode: ask the resolver. We MUST NOT block the iterator
         // forever — the resolver is responsible for honouring any timeout.
+        startToolSpan(event, decision);
         yield syntheticApprovalRequested(event, decision.reason);
         const verdict = await resolver({
           toolCallId: event.toolCallId,
@@ -271,6 +335,10 @@ export function interceptProviderStream(
             reason: decision.reason,
             decidedBy: 'human',
           });
+          // Decision recorded on the span; the result will close it later.
+          if (emitter) {
+            emitter.setAttribute(toolSpans.get(event.toolCallId)!, 'agent_os.decided_by', 'human');
+          }
           yield event;
         } else {
           await auditor.onCall({
@@ -293,6 +361,10 @@ export function interceptProviderStream(
             isError: true,
             latencyMs: 0,
           });
+          endToolSpan(event.toolCallId, 'error', {
+            'agent_os.tool.outcome': 'rejected',
+            'agent_os.error': rejectReason,
+          });
         }
         continue;
       }
@@ -311,6 +383,10 @@ export function interceptProviderStream(
           result: event.result,
           ...(event.isError !== undefined ? { isError: event.isError } : {}),
           latencyMs,
+        });
+        endToolSpan(event.toolCallId, event.isError === true ? 'error' : 'ok', {
+          'agent_os.latency_ms': latencyMs,
+          ...(event.isError !== undefined ? { 'agent_os.tool.is_error': event.isError } : {}),
         });
         yield event;
         continue;

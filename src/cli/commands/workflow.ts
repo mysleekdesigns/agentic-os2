@@ -56,6 +56,7 @@ import { openDatabase, type AgentOsDb } from '../../storage/db.js';
 import { runMigrations } from '../../storage/migrate.js';
 import { createBlobStore } from '../../storage/blobs.js';
 import { agents, approvals, runs, steps } from '../../storage/schema.js';
+import { createObservabilityFromConfig } from '../../core/observability/index.js';
 
 // ---------------------------------------------------------------------------
 // Workspace / DB helpers (mirrors agent.ts + run.ts conventions)
@@ -506,6 +507,11 @@ export async function runWorkflowCommand(
   const adapterFactory = internals.providerAdapterFactory ?? createProviderAdapter;
   const adapter = adapterFactory({ providerId, workspaceRoot: workspace });
 
+  // Phase 8: optional span emitter — wires every workflow / agent / tool
+  // call span into the `traces` table for `agent-os show <run-id>` to walk.
+  const config = loadConfig(undefined, { env: process.env });
+  const obs = createObservabilityFromConfig(config, db);
+
   let exitCode = 1;
   try {
     const stream = runWorkflow({
@@ -520,6 +526,7 @@ export async function runWorkflowCommand(
       providerAdapter: adapter,
       approvalResolver: cliApprovalResolver,
       signal: controller.signal,
+      ...(obs.emitter ? { emitter: obs.emitter } : {}),
     });
     const result = await consumeEvents(stream, { json, runId });
     exitCode = result.exitCode;
@@ -538,6 +545,13 @@ export async function runWorkflowCommand(
     exitCode = 1;
   } finally {
     process.off('SIGINT', onSigint);
+    if (obs.emitter) {
+      try {
+        await obs.emitter.flush();
+      } catch {
+        // Best-effort.
+      }
+    }
     db.$sqlite.close();
   }
   return exitCode;
@@ -569,6 +583,7 @@ export async function resumeWorkflowCommand(
   process.on('SIGINT', onSigint);
 
   let exitCode = 1;
+  let resumeEmitterFlush: (() => Promise<void>) | null = null;
   try {
     const rows = await db.select().from(runs).where(eq(runs.id, runId));
     if (rows.length === 0) {
@@ -600,6 +615,12 @@ export async function resumeWorkflowCommand(
     const adapterFactory = internals.providerAdapterFactory ?? createProviderAdapter;
     const adapter = adapterFactory({ providerId, workspaceRoot: workspace });
 
+    const config = loadConfig(undefined, { env: process.env });
+    const obs = createObservabilityFromConfig(config, db);
+    if (obs.emitter) {
+      resumeEmitterFlush = () => obs.emitter!.flush();
+    }
+
     const stream = resumeWorkflow({
       def: found.def,
       runId,
@@ -608,6 +629,7 @@ export async function resumeWorkflowCommand(
       providerAdapter: adapter,
       approvalResolver: cliApprovalResolver,
       signal: controller.signal,
+      ...(obs.emitter ? { emitter: obs.emitter } : {}),
     });
     const result = await consumeEvents(stream, { json, runId });
     exitCode = result.exitCode;
@@ -625,6 +647,13 @@ export async function resumeWorkflowCommand(
     exitCode = 1;
   } finally {
     process.off('SIGINT', onSigint);
+    if (resumeEmitterFlush) {
+      try {
+        await resumeEmitterFlush();
+      } catch {
+        // Best-effort.
+      }
+    }
     db.$sqlite.close();
   }
   return exitCode;

@@ -41,6 +41,7 @@ import { createSqliteAuditor, type SqliteAuditor } from '../../core/tools/audit.
 import { openDatabase, type AgentOsDb } from '../../storage/db.js';
 import { runMigrations } from '../../storage/migrate.js';
 import { createBlobStore } from '../../storage/blobs.js';
+import { createObservabilityFromConfig, type SpanEmitter } from '../../core/observability/index.js';
 import { createTtyApprovalResolver } from '../approvals.js';
 import { renderEvent, renderJsonLine } from '../transcript.js';
 
@@ -249,15 +250,69 @@ export async function runAgent(
     queueDefaultTtlSeconds = (config.approvals.default_ttl_minutes ?? 60) * 60;
   }
 
+  // Phase 8: build the observability emitter when traces are enabled. We
+  // reuse an existing DB handle (audit > queue) when one is already open;
+  // otherwise we open a workspace handle of our own and close it in the
+  // `finally` block. The interceptor accepts an optional `runId` and the
+  // run-level run id surfaces via the SqliteAuditor when present.
+  let tracesDb: AgentOsDb | null = null;
+  let tracesDbCloseOnFinally = false;
+  let emitter: SpanEmitter | undefined;
+  let runIdForSpans = '';
+  if (config.observability.traces) {
+    try {
+      if (auditor && isSqliteAuditor(auditor)) {
+        // SqliteAuditor already opened the DB and persisted a `runs` row; we
+        // can't reach the handle from here, so open a second connection to
+        // the same file. SQLite's WAL mode permits concurrent readers/writers
+        // across handles.
+        tracesDb = await openOrInitWorkspaceDb(workspaceRoot);
+        tracesDbCloseOnFinally = true;
+        runIdForSpans = (auditor as SqliteAuditor).runId;
+      } else if (queueDb) {
+        tracesDb = queueDb;
+        tracesDbCloseOnFinally = false;
+      } else {
+        tracesDb = await openOrInitWorkspaceDb(workspaceRoot);
+        tracesDbCloseOnFinally = true;
+      }
+      const obs = createObservabilityFromConfig(config, tracesDb);
+      emitter = obs.emitter;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`agent-os run: observability setup failed: ${message}\n`);
+      emitter = undefined;
+    }
+  }
+
   let exitCode = 1;
   let sawDone = false;
   let finalReason: 'completed' | 'cancelled' | 'error' = 'error';
+  // Phase 8: agent span around the entire run (single-agent case). When the
+  // emitter is undefined this is a no-op.
+  const agentSpan = emitter
+    ? emitter.start({
+        kind: 'agent',
+        name: `agent:${def.frontmatter.id}`,
+        runId: runIdForSpans,
+        attributes: {
+          'gen_ai.operation.name': 'chat',
+          'gen_ai.system': providerName,
+          'gen_ai.request.model': modelName,
+          'agent_os.agent_id': def.frontmatter.id,
+          'agent_os.run_id': runIdForSpans,
+        },
+      })
+    : undefined;
   try {
     const wrapped = interceptProviderStream(provider, input, {
       agent: def.frontmatter,
       security: config.security,
       approvalResolver,
       ...(auditor ? { auditor } : {}),
+      ...(emitter ? { emitter } : {}),
+      ...(agentSpan ? { parentSpan: agentSpan } : {}),
+      ...(runIdForSpans ? { runId: runIdForSpans } : {}),
       ...(queueApprovals && queueDb
         ? {
             mode: 'queue' as const,
@@ -308,6 +363,24 @@ export async function runAgent(
     exitCode = 1;
   } finally {
     process.off('SIGINT', onSigint);
+    if (emitter && agentSpan) {
+      try {
+        emitter.end(
+          agentSpan,
+          finalReason === 'completed' ? 'ok' : finalReason === 'cancelled' ? 'cancelled' : 'error',
+        );
+      } catch {
+        // Best-effort.
+      }
+    }
+    if (emitter) {
+      try {
+        await emitter.flush();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`agent-os run: observability flush failed: ${message}\n`);
+      }
+    }
     if (auditor && auditorIsFinalizable) {
       try {
         await (auditor as SqliteAuditor).finalize(finalReason);
@@ -319,6 +392,13 @@ export async function runAgent(
     if (queueDbCloseOnFinally && queueDb) {
       try {
         queueDb.$sqlite.close();
+      } catch {
+        // Ignore close errors — best-effort cleanup.
+      }
+    }
+    if (tracesDbCloseOnFinally && tracesDb) {
+      try {
+        tracesDb.$sqlite.close();
       } catch {
         // Ignore close errors — best-effort cleanup.
       }

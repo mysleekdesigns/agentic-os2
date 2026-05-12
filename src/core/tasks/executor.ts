@@ -59,6 +59,7 @@ import {
   decideRequest as decideApprovalRequest,
   getRequest as getApprovalRequest,
 } from '../approvals/index.js';
+import type { SpanContext, SpanEmitter } from '../observability/index.js';
 import type {
   AgentStepDef,
   ApprovalStepDef,
@@ -139,6 +140,13 @@ export interface RunWorkflowOptions {
   approvalResolver?: ApprovalResolver;
   /** Cooperative cancellation. */
   signal?: AbortSignal;
+  /**
+   * Optional Phase 8 span emitter. When supplied, the executor emits one
+   * `workflow` root span and one `agent` span per agent step (with status
+   * mirroring the step outcome). When absent, no spans are produced —
+   * Phase 5/6 behaviour is preserved exactly.
+   */
+  emitter?: SpanEmitter;
 }
 
 export interface ResumeWorkflowOptions {
@@ -149,6 +157,8 @@ export interface ResumeWorkflowOptions {
   providerAdapter: ProviderAdapter;
   approvalResolver?: ApprovalResolver;
   signal?: AbortSignal;
+  /** See {@link RunWorkflowOptions.emitter}. */
+  emitter?: SpanEmitter;
 }
 
 export interface CancelWorkflowOptions {
@@ -207,6 +217,7 @@ export function resumeWorkflow(opts: ResumeWorkflowOptions): AsyncIterable<Workf
       providerAdapter: opts.providerAdapter,
       ...(opts.approvalResolver ? { approvalResolver: opts.approvalResolver } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.emitter ? { emitter: opts.emitter } : {}),
     },
     true,
   );
@@ -240,6 +251,10 @@ interface ExecutorCtx {
   approvalResolver: ApprovalResolver;
   signal: AbortSignal;
   emit: (ev: WorkflowEvent) => void;
+  /** Phase 8: optional span emitter; undefined → no instrumentation. */
+  emitter?: SpanEmitter;
+  /** Root workflow span context (set when `emitter` is present). */
+  workflowSpan?: SpanContext;
 }
 
 async function* executeStream(
@@ -360,6 +375,23 @@ async function execute(
     });
   }
 
+  // Phase 8: open the root workflow span before any step runs. We carry the
+  // SpanContext on the ExecutorCtx so step handlers can parent their spans.
+  const workflowSpan = opts.emitter
+    ? opts.emitter.start({
+        kind: 'workflow',
+        name: `workflow:${def.id}`,
+        runId,
+        attributes: {
+          'agent_os.run_id': runId,
+          'agent_os.workflow_id': def.id,
+          'agent_os.workflow_version': def.version,
+          'gen_ai.system': opts.provider ?? 'workflow',
+          'gen_ai.request.model': opts.model ?? def.id,
+        },
+      })
+    : undefined;
+
   // Merge any caller-supplied input into the state so goal templating works.
   const ctx: ExecutorCtx = {
     runId,
@@ -371,6 +403,8 @@ async function execute(
     approvalResolver,
     signal,
     emit,
+    ...(opts.emitter ? { emitter: opts.emitter } : {}),
+    ...(workflowSpan ? { workflowSpan } : {}),
   };
 
   // Stash inputs on the state outputs under the reserved key `__inputs__` so
@@ -386,6 +420,9 @@ async function execute(
       .set({ status: 'succeeded', endedAt: new Date() })
       .where(eq(runs.id, runId));
     emit({ type: 'workflow_completed', runId, timestamp: Date.now() });
+    if (ctx.emitter && ctx.workflowSpan) {
+      ctx.emitter.end(ctx.workflowSpan, 'ok');
+    }
   } catch (err) {
     if (err instanceof WorkflowPause) {
       // Run row already updated to 'pending' inside the step handler.
@@ -396,6 +433,12 @@ async function execute(
         reason: err.reason,
         stepId: err.stepId,
       });
+      if (ctx.emitter && ctx.workflowSpan) {
+        ctx.emitter.end(ctx.workflowSpan, 'cancelled', {
+          'agent_os.paused_reason': err.reason,
+          'agent_os.paused_step_id': err.stepId,
+        });
+      }
       return;
     }
     if (signal.aborted) {
@@ -404,6 +447,9 @@ async function execute(
         .set({ status: 'cancelled', endedAt: new Date() })
         .where(eq(runs.id, runId));
       emit({ type: 'workflow_cancelled', runId, timestamp: Date.now() });
+      if (ctx.emitter && ctx.workflowSpan) {
+        ctx.emitter.end(ctx.workflowSpan, 'cancelled');
+      }
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
@@ -419,6 +465,12 @@ async function execute(
       error: message,
       ...(failedStepId ? { stepId: failedStepId } : {}),
     });
+    if (ctx.emitter && ctx.workflowSpan) {
+      ctx.emitter.end(ctx.workflowSpan, 'error', {
+        'agent_os.error': message,
+        ...(failedStepId ? { 'agent_os.failed_step_id': failedStepId } : {}),
+      });
+    }
   }
 }
 
@@ -485,6 +537,26 @@ async function executeAgentStep(step: AgentStepDef, ctx: ExecutorCtx): Promise<v
     kind: 'agent',
   });
 
+  // Phase 8: open an `agent` span around the provider call. We use the
+  // workflow span as the parent so the CLI's tree-rendering works without
+  // any join-table lookups.
+  const agentSpan = ctx.emitter
+    ? ctx.emitter.start({
+        kind: 'agent',
+        name: `agent:${step.agent}`,
+        runId: ctx.runId,
+        ...(ctx.workflowSpan ? { parent: ctx.workflowSpan } : {}),
+        attributes: {
+          'gen_ai.operation.name': 'chat',
+          'gen_ai.system': 'workflow',
+          'gen_ai.request.model': step.model ?? '',
+          'agent_os.run_id': ctx.runId,
+          'agent_os.step_id': step.id,
+          'agent_os.agent_id': step.agent,
+        },
+      })
+    : undefined;
+
   const retry: RetryPolicy = step.retry ?? { max_attempts: 1, backoff_ms: 0 };
   let attempt = 0;
   let lastErr: Error | null = null;
@@ -524,6 +596,9 @@ async function executeAgentStep(step: AgentStepDef, ctx: ExecutorCtx): Promise<v
         kind: 'agent',
         output,
       });
+      if (ctx.emitter && agentSpan) {
+        ctx.emitter.end(agentSpan, 'ok', { 'agent_os.attempt': attempt });
+      }
       return;
     } catch (err) {
       if (timer) clearTimeout(timer);
@@ -549,15 +624,19 @@ async function executeAgentStep(step: AgentStepDef, ctx: ExecutorCtx): Promise<v
   }
 
   // Retries exhausted.
-  await markStepFailed(ctx, dbStepId, lastErr?.message ?? 'unknown error');
+  const finalErr = lastErr?.message ?? 'unknown error';
+  await markStepFailed(ctx, dbStepId, finalErr);
   ctx.emit({
     type: 'step_failed',
     runId: ctx.runId,
     timestamp: Date.now(),
     stepId: step.id,
     kind: 'agent',
-    error: lastErr?.message ?? 'unknown error',
+    error: finalErr,
   });
+  if (ctx.emitter && agentSpan) {
+    ctx.emitter.end(agentSpan, 'error', { 'agent_os.error': finalErr });
+  }
   throw new StepFailure(lastErr?.message ?? 'step failed', step.id);
 }
 
