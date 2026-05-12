@@ -1,0 +1,41 @@
+description: 'Smoke test: research_agent produces a cited, tradeoff-aware synthesis on a happy-path query.'
+
+prompts:
+  - 'Compare Drizzle ORM vs Prisma for SQLite-first applications. What are the tradeoffs?'
+
+providers:
+  - id: agent-os:research_agent
+
+tests:
+  - description: 'Happy path — output cites sources, identifies tradeoffs, compares alternatives.'
+    assert:
+      # --- Deterministic asserts (run with no API key) ---
+
+      # success_criteria: "cites credible sources" — output must contain at least one URL citation.
+      - type: regex
+        value: "https?://[\\w./%-]+"
+
+      # success_criteria: "cites credible sources" — output should reference its Sources section.
+      - type: contains-any
+        value: ['Sources', 'source:', '[source:']
+
+      # success_criteria: "identifies tradeoffs" — output must include a Tradeoffs section header.
+      - type: icontains
+        value: 'Tradeoffs'
+
+      # success_criteria: "compares alternatives" — both compared options must appear by name.
+      - type: contains-all
+        value: ['Drizzle', 'Prisma']
+
+      # Structural: synthesis should be more than a one-liner (Answer + Key findings + Tradeoffs + Sources).
+      - type: javascript
+        value: |
+          // Expect the four canonical sections from the agent's output format.
+          const required = ["Answer", "Key findings", "Tradeoffs", "Sources"];
+          return required.every((s) => output.includes(s));
+
+      # --- Model-graded asserts (Phase 9 follow-up; skipped when no API provider is enabled) ---
+      # PRD Phase 9: model-graded scorers run only when an API-backed provider is configured.
+      - type: llm-rubric
+        value: 'Output cites at least two independent sources and explicitly identifies at least one tradeoff between the compared alternatives.'
+        provider: anthropic:claude-haiku-4-5-20251001

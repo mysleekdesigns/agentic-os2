@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { Command } from 'commander';
 import { buildInitCommand } from './commands/init.js';
+import { buildAgentCommand } from './commands/agent.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,6 +39,7 @@ export function buildProgram(): Command {
     });
 
   program.addCommand(buildInitCommand());
+  program.addCommand(buildAgentCommand());
 
   return program;
 }

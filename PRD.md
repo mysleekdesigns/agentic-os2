@@ -496,23 +496,60 @@ WITH NITS; `verify-no-api-key` gate PASS with `ANTHROPIC_API_KEY`,
 
 ---
 
-### Phase 2 — Agent Registry
+### Phase 2 — Agent Registry ✅ COMPLETE (2026-05-12)
 
 **Outcome**: File-based agent definitions are loaded, validated, versioned,
 and visible via CLI.
 
-- [ ] Define agent file format (md + YAML frontmatter, see §2.6).
-- [ ] Implement loader that walks `agents/`, parses, validates with Zod.
-- [ ] Hash + version each agent definition; record in `agents` table.
-- [ ] Add `agent-os agent list` and `agent-os agent show <id>` commands.
-- [ ] Add 3 starter templates (`research_agent`, `code_reviewer`,
+- [x] Define agent file format (md + YAML frontmatter, see §2.6).
+- [x] Implement loader that walks `agents/`, parses, validates with Zod.
+- [x] Hash + version each agent definition; record in `agents` table.
+- [x] Add `agent-os agent list` and `agent-os agent show <id>` commands.
+- [x] Add 3 starter templates (`research_agent`, `code_reviewer`,
       `doc_writer`) in `agents/templates/`.
-- [ ] Mirror agent files into `.claude/agents/` so Claude Code's native
-      subagent loader sees them. (Symlink or `agent-os sync` command.)
-- [ ] Document the dual-purpose nature in `docs/claude-code-max.md`.
+- [x] Mirror agent files into `.claude/agents/` so Claude Code's native
+      subagent loader sees them. (`agent-os agent sync` command.)
+- [x] Document the dual-purpose nature in `docs/claude-code-max.md`.
 
-**Exit**: Templates load; `agent show` prints validated definition; Claude
-Code can `/agents` list them.
+**Exit (met)**: `npm test` green (64 tests across 11 files, including 24 new
+tests covering schema/loader/registry/mirror/CLI); `npm run typecheck` and
+`npm run lint` clean; `agent-os agent list/show/sync` work end-to-end against
+a tmp workspace; canonical files at `agents/templates/*` validate against the
+Zod schema; `sync` writes mirror files to `.claude/agents/<id>.md` with a
+synthesized `description` field and upserts rows into the `agents` registry
+table. Auditors: `eval-fixture-author` PASS WITH NITS (starter smoke fixtures
+shipped per agent, voice-matching criteria deferred to Phase 9);
+`mcp-security-auditor` PASS WITH NITS (id-slug constraint added during phase
+to close the only medium finding). `verify-no-api-key` PASS with
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `CLAUDE_API_KEY` unset (tests +
+typecheck + lint + CLI smoke).
+
+**Artifacts shipped**: `src/core/agents/{schema.ts,loader.ts,registry.ts,mirror.ts,index.ts}`,
+`src/cli/commands/agent.ts` (subcommands `list`, `show`, `sync`, each with
+`--json`), updated `src/cli/index.ts`, slash-command wrappers
+`.claude/commands/{agent-list,agent-show,agent-sync}.md`, starter templates
+`agents/templates/{research_agent,code_reviewer,doc_writer}.md`, starter
+Promptfoo-compatible smoke fixtures
+`evals/fixtures/{research_agent,code_reviewer,doc_writer}/smoke.yaml`,
+docs `docs/claude-code-max.md`, new tests
+`tests/core/agents/{schema,loader,registry,mirror}.test.ts` and
+`tests/cli/agent.test.ts`.
+
+**Known follow-ups** (auditor nits, recorded for later phases):
+
+- Phase 9 should add edge/adversarial/regression fixture cases to each agent's
+  `evals/fixtures/<id>/` directory; `smoke.yaml` covers happy-path only.
+- Phase 9 should decide whether `doc_writer`'s "matches existing voice" gets a
+  deterministic surrogate (e.g. avg sentence length) or stays model-graded.
+- Phase 12 policy engine should reject any agent file with a
+  `write|network|shell|destructive`-tagged tool listed in `tools.allowed`
+  rather than `tools.approval_required`.
+- `mirror.ts` synthesizes the Claude Code `description` from `role`; add a
+  unit-test fixture covering YAML-significant characters in `role` to lock in
+  js-yaml's quoting behaviour.
+- Consider embedding the canonical file hash as a comment in the mirrored
+  `.claude/agents/<id>.md` so drift detection still works if a user hand-edits
+  the mirror.
 
 ---
 
@@ -611,7 +648,7 @@ policies; no uncontrolled writes.
 - [ ] Enforce per-agent `memory.read` / `memory.write` allow-lists at the
       provider boundary.
 - [ ] CLI: `memory list <scope>`, `memory show <id>`, `memory write <scope>
-  <key>`, `memory rm <id>`, `memory search "<query>" [--scope ...]`.
+<key>`, `memory rm <id>`, `memory search "<query>" [--scope ...]`.
 - [ ] Document write policy: append by default; updates require diff; deletes
       are tombstoned, not destructive.
 - [ ] Provide a `MEMORY.md` index pattern compatible with Claude Code's
@@ -846,7 +883,7 @@ Project-level quality bar:
 - [ ] Research summary (this PRD §1)
 - [ ] Architecture document (§2 + `docs/architecture.md`)
 - [x] Data model (§2.4)
-- [ ] Agent configuration schema (§2.6 + Zod)
+- [x] Agent configuration schema (§2.6 + Zod)
 - [ ] Workflow configuration schema (Phase 5)
 - [ ] Provider abstraction with Claude Code local mode first (Phase 3)
 - [ ] Optional API provider implementations (Phase 11)
@@ -858,7 +895,7 @@ Project-level quality bar:
 - [ ] Eval framework (Phase 9)
 - [ ] CLI interface (Phase 10)
 - [ ] Tests (Phase 14)
-- [ ] Example agents (Phases 2 + 13)
+- [x] Example agents (Phases 2 + 13)
 - [ ] Example workflows (Phases 5 + 13)
 - [ ] Documentation for Claude Code Max users (Phase 13)
 - [ ] Documentation for API users (Phase 13)

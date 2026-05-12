@@ -1,0 +1,46 @@
+description: 'Smoke test: doc_writer drafts a new doc, links canonical sources, and updates the ToC.'
+
+prompts:
+  - 'Write a short doc at docs/agent-registry.md describing how the agent registry loads templates from agents/templates/. Update docs/README.md to link it.'
+
+providers:
+  - id: agent-os:doc_writer
+
+tests:
+  - description: 'Happy path — output is markdown, names the files it will write, links canonical sources, and updates the ToC.'
+    assert:
+      # --- Deterministic asserts (run with no API key) ---
+
+      # Structural: doc_writer's output format requires a "Files to write" section.
+      - type: icontains
+        value: 'Files to write'
+
+      # Must name both the new doc and the ToC update target.
+      - type: contains-all
+        value: ['docs/agent-registry.md', 'docs/README.md']
+
+      # success_criteria: "links to canonical sources" — output should reference the implementation path
+      # or PRD section it's documenting (per the agent's "Locate canonical sources" step).
+      - type: icontains-any
+        value: ['agents/templates/', 'PRD', 'agent-os.config', 'src/']
+
+      # success_criteria: "updates table-of-contents when present" — must show a ToC diff/update for README.
+      - type: icontains-any
+        value: ['ToC', 'table of contents', '(update ToC)', 'README.md (update)']
+
+      # Output must contain an actual markdown heading for the new doc (not just metadata).
+      - type: regex
+        value: "(?m)^#\\s+\\S"
+
+      # Structural: there should be a fenced markdown or diff block containing the drafted content.
+      - type: javascript
+        value: |
+          // Expect at least one fenced code block (markdown or diff) in the response.
+          const fences = (output.match(/```/g) || []).length;
+          return fences >= 2;
+
+      # --- Model-graded asserts (Phase 9 follow-up; skipped when no API provider is enabled) ---
+      # success_criteria: "matches existing voice" — voice/style match is inherently model-graded.
+      - type: llm-rubric
+        value: 'The drafted doc matches the voice of docs/architecture.md (short paragraphs, concrete examples, links over abstraction) and does not invent product behavior not present in the codebase or PRD.'
+        provider: anthropic:claude-haiku-4-5-20251001
