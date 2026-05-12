@@ -898,24 +898,42 @@ command wrappers `.claude/commands/{show,logs}.md`; tests
 
 ---
 
-### Phase 9 — Evaluation framework
+### Phase 9 — Evaluation framework ✅ COMPLETE (2026-05-12)
 
 **Outcome**: Reproducible evaluations of agent behavior with regression
 detection over time.
 
-- [ ] Define eval fixture format (Promptfoo-compatible YAML where possible):
+- [x] Define eval fixture format (Promptfoo-compatible YAML where possible):
       input prompt, expected behaviors, scorers, dataset reference.
-- [ ] Scorers: deterministic (regex, JSON shape, presence of citations),
+- [x] Scorers: deterministic (regex, JSON shape, presence of citations),
       programmatic (custom JS), and optional model-graded (only when an
       API-backed provider is enabled; degrades cleanly otherwise).
-- [ ] Eval runner: `agent-os eval run <fixture-or-dir>`; persists to
+- [x] Eval runner: `agent-os eval run <fixture-or-dir>`; persists to
       `eval_results`.
-- [ ] Compare runs: `agent-os eval diff <run-a> <run-b>`.
-- [ ] Add CI-friendly exit codes and JSON output mode.
-- [ ] Ship 2 example fixture suites (one per starter agent).
+- [x] Compare runs: `agent-os eval diff <run-a> <run-b>`.
+- [x] Add CI-friendly exit codes and JSON output mode.
+- [x] Ship 2 example fixture suites (one per starter agent).
 
-**Exit**: Eval suite runs locally, fails when an agent stops citing sources,
-diffs cleanly between runs.
+**Exit (met)**: Pure eval library at `src/core/eval/` parses every existing
+Promptfoo-style fixture (3 starter-agent suites), evaluates deterministic
+scorers (`regex`, `contains*`, `icontains*`, `is-json`, `javascript`) plus
+optional `llm-rubric` that cleanly skips when no API provider is configured.
+`agent-os eval run` streams a real agent via the Provider abstraction,
+persists one row per fixture to `eval_results`, snapshots the full
+`EvalRunReport` to `.agent-os/eval-runs/<runId>.json`, and exits 0/1 per
+PRD §1.6. `agent-os eval diff` reads two snapshots without re-running and
+exits 1 on any `regressed` row. 471 tests pass (15 new under
+`tests/core/eval/` and `tests/cli/eval.test.ts`); typecheck + lint clean;
+`verify-no-api-key` PASS with `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/
+`CLAUDE_API_KEY` unset. Auditor `eval-fixture-author`: PASS (every
+fixture's assertion `type` is supported by the loader/scorer; all three
+starter agents already carry `eval.success_criteria` in frontmatter).
+
+**Artifacts shipped**: `src/core/eval/{types,loader,scorers,runner,index}.ts`;
+`src/cli/commands/eval.ts` wired into `src/cli/index.ts`;
+`.claude/commands/{eval-run,eval-diff}.md`; tests
+`tests/core/eval/{loader,scorers,runner}.test.ts` and
+`tests/cli/eval.test.ts` (15 new tests).
 
 ---
 
@@ -1111,7 +1129,7 @@ Project-level quality bar:
 - [x] Memory abstraction (Phase 7)
 - [x] Human approval flow (Phase 6)
 - [x] Observability/logging layer (Phase 8)
-- [ ] Eval framework (Phase 9)
+- [x] Eval framework (Phase 9)
 - [ ] CLI interface (Phase 10)
 - [ ] Tests (Phase 14)
 - [x] Example agents (Phases 2 + 13)

@@ -11,6 +11,7 @@ import { buildRunCommand } from './commands/run.js';
 import { buildWorkflowCommand } from './commands/workflow.js';
 import { buildShowCommand } from './commands/show.js';
 import { buildLogsCommand } from './commands/logs.js';
+import { buildEvalCommand } from './commands/eval.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -52,6 +53,7 @@ export function buildProgram(): Command {
   program.addCommand(buildMemoryCommand());
   program.addCommand(buildShowCommand());
   program.addCommand(buildLogsCommand());
+  program.addCommand(buildEvalCommand());
 
   return program;
 }
