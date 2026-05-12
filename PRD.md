@@ -553,24 +553,90 @@ docs `docs/claude-code-max.md`, new tests
 
 ---
 
-### Phase 3 — Provider abstraction (Claude Code local mode)
+### Phase 3 — Provider abstraction (Claude Code local mode) ✅ COMPLETE (2026-05-12)
 
 **Outcome**: Agents can be run end-to-end with zero API key, using the user's
 Claude Code Max login.
 
-- [ ] Define `Provider` interface, `Capabilities`, `RunEvent` union.
-- [ ] Implement `claude_code_local` provider backed by
+- [x] Define `Provider` interface, `Capabilities`, `RunEvent` union.
+- [x] Implement `claude_code_local` provider backed by
       `@anthropic-ai/claude-agent-sdk`.
-- [ ] Pass MCP server config from `.mcp.json` through to the SDK so tools work.
-- [ ] Stream `RunEvent`s back: `message`, `tool_call`, `tool_result`,
+- [x] Pass MCP server config from `.mcp.json` through to the SDK so tools work.
+- [x] Stream `RunEvent`s back: `message`, `tool_call`, `tool_result`,
       `approval_requested`, `error`, `done`.
-- [ ] Mark `cost`/`tokens` fields nullable for this provider; surface what
+- [x] Mark `cost`/`tokens` fields nullable for this provider; surface what
       the SDK exposes.
-- [ ] Add `agent-os run <agent-id> "<goal>"` CLI command that drives a single
+- [x] Add `agent-os run <agent-id> "<goal>"` CLI command that drives a single
       agent through the provider and prints a clean transcript.
 
-**Exit**: `agent-os run research_agent "summarize Crawlforge MCP tools"`
-completes locally with no API key set.
+**Exit (met)**: `npm test` green (129 tests across 19 files; +65 over Phase 2
+covering provider core, claude_code_local adapter, MCP loader, SDK event
+mapper, CLI run command, transcript renderer); `npm run typecheck` and
+`npm run lint` clean; `agent-os run --help` discoverable; `agent-os run
+<unknown> …` exits 1 with a tidy error. The `claude_code_local` adapter
+authenticates via the Claude Agent SDK's Max-plan path and reads no
+`ANTHROPIC_API_KEY` / `CLAUDE_API_KEY` / `OPENAI_API_KEY` env vars (verified by
+dedicated adapter test + `verify-no-api-key` gate with all three unset).
+Cost/tokens always emit as `null` in the `done` event; transcript renders
+them as `—` (PRD §1.5 honest rendering). Auditors: `provider-capability-auditor`
+PASS WITH NITS; `mcp-security-auditor` PASS WITH NITS. `verify-no-api-key`
+PASS (npm test + typecheck + lint + build + CLI smoke all green with the three
+API key vars unset).
+
+**Artifacts shipped**: `src/core/providers/{types.ts,capabilities.ts,factory.ts,fake.ts,index.ts}`,
+`src/providers/claude_code_local/{adapter.ts,mcp.ts,index.ts}`,
+`src/cli/commands/run.ts`, `src/cli/transcript.ts`, updated `src/cli/index.ts`,
+slash-command wrapper `.claude/commands/run.md`, new tests
+`tests/core/providers/{types,fake,factory}.test.ts`,
+`tests/providers/claude_code_local/{mcp,adapter,mapSdkEvent}.test.ts`,
+`tests/cli/{run,transcript}.test.ts`. `package.json` adds
+`@anthropic-ai/claude-agent-sdk` (`^0.2.140`) as a dependency.
+
+**Known follow-ups** (auditor nits, recorded for later phases):
+
+- A non-success SDK `result` (`subtype: 'error_during_execution'` etc.) yields
+  an `error` RunEvent followed by `done(reason: 'completed')` — the CLI then
+  maps to exit code 0. The natural stream-end path should propagate the
+  error-seen flag into `emitDone` so the `done.reason` is `'error'`. Add a
+  vitest case for the result-error subtype. (Major; Phase 4 should fix
+  before the approval/audit pipeline depends on `done.reason`.)
+- `defaultCapabilitiesFor('claude_code_local').vision = true` but the adapter
+  only maps `text` and `tool_use` content blocks — image/document output
+  blocks are silently dropped. Either downgrade `vision` to `false` until
+  multimodal blocks round-trip, or extend `RunEvent` to carry non-text
+  content (latter is a contract change — Phase 4+).
+- `approval_requested` mapped from a permission_denied system message sets
+  `args: undefined`; the SDK exposes the original tool input. Phase 6's
+  approval UX needs faithful args — surface them when mapping.
+- `tool_result` blocks lacking `tool_use_id` get `toolCallId: ''`. Use a
+  per-run monotonic counter (`tr_${n}`) instead, matching how
+  `scriptedTranscript()` mints ids.
+- `tool_call` blocks lacking `id` mint a random `tc_…`; switch to the same
+  per-run counter for stable trace snapshots.
+- `tryRegister` in `src/core/providers/index.ts` swallows every error from
+  the adapter module, masking real bugs as "unknown provider". Differentiate
+  `ERR_MODULE_NOT_FOUND` from other errors and rethrow the latter (or gate
+  behind `AGENT_OS_DEBUG=1`).
+- `FakeProvider.id` is hard-coded to `'claude_code_local'`. Accept `id` as a
+  constructor option so Phase 11 tests can fake `anthropic_api` /
+  `openai_api`.
+- `input.approvalRequiredTools` is plumbed through `AgentRunInput` and the
+  CLI but never read by the adapter (no Phase 3 wire to the SDK). Phase 4
+  will own enforcement; until then add a comment so the silent drop isn't
+  forgotten.
+- MCP `command` strings are accepted verbatim — including absolute paths
+  outside the workspace. Phase 4/12 should treat out-of-workspace `command`
+  as `network|shell` (approval required) and consider optional
+  `command_sha256` pinning per PRD §1.7.
+- The committed `.mcp.json` contains real-looking secrets
+  (`CRAWLFORGE_CREATOR_SECRET`, `GOOGLE_API_KEY`). Pre-existing — not a
+  Phase 3 regression — but rotate, add `.mcp.json` to `.gitignore`, and ship
+  a `.mcp.example.json` instead.
+- `@anthropic-ai/claude-agent-sdk@0.2.140` declares `zod ^4.0.0` as a peer;
+  the repo pins `zod ^3.23.8`. `npm install --legacy-peer-deps` is currently
+  required. Either migrate the project to zod v4 (ripples through Bundle A's
+  schemas) or pin the SDK to a version that still accepts zod v3. Document
+  in README if neither.
 
 ---
 
@@ -885,7 +951,7 @@ Project-level quality bar:
 - [x] Data model (§2.4)
 - [x] Agent configuration schema (§2.6 + Zod)
 - [ ] Workflow configuration schema (Phase 5)
-- [ ] Provider abstraction with Claude Code local mode first (Phase 3)
+- [x] Provider abstraction with Claude Code local mode first (Phase 3)
 - [ ] Optional API provider implementations (Phase 11)
 - [ ] Tool/MCP permission model (Phase 4 + §1.7)
 - [ ] Task orchestration engine (Phase 5)

@@ -20,6 +20,7 @@
     "db:migrate": "tsx src/storage/migrate.ts"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.140",
     "better-sqlite3": "^11.0.0",
     "commander": "^12.1.0",
     "drizzle-orm": "^0.36.0",
