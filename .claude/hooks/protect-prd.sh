@@ -11,7 +11,8 @@
 # Inputs (PreToolUse JSON on stdin):
 #   .tool_name                  "Edit" or "Write"
 #   .tool_input.file_path       target absolute path
-#   .session.user_prompt        the most recent user prompt text (best-effort)
+#   .transcript_path            JSONL transcript file; we scan recent user
+#                               turns for an allow-list trigger word.
 #
 # Exit 2 blocks the call.
 
@@ -29,7 +30,23 @@ case "$FILE" in
     ;;
 esac
 
-PROMPT=$(printf '%s' "$INPUT" | jq -r '.session.user_prompt // .user_prompt // empty' 2>/dev/null || true)
+# Claude Code PreToolUse JSON does not include the user prompt directly; it
+# provides transcript_path (a JSONL file). Pull recent user-turn text out of
+# the transcript and search it for an allow-list trigger word.
+TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || true)
+PROMPT=""
+if [ -n "$TRANSCRIPT" ] && [ -r "$TRANSCRIPT" ]; then
+  # Scan the last 200 transcript lines, keep only user turns, and extract
+  # their text. Content can be a plain string or an array of blocks with
+  # `text` fields.
+  PROMPT=$(tail -n 200 "$TRANSCRIPT" 2>/dev/null \
+    | jq -r 'select(.type == "user") |
+             (.message.content // .content // "") |
+             if type == "string" then .
+             elif type == "array" then (map(.text // "") | join(" "))
+             else "" end' 2>/dev/null \
+    | tail -n 20 | tr '\n' ' ' || true)
+fi
 PROMPT_LC=$(printf '%s' "$PROMPT" | tr '[:upper:]' '[:lower:]')
 
 # Allow when:

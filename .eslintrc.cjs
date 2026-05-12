@@ -9,14 +9,17 @@ module.exports = {
     ecmaVersion: 2022,
   },
   plugins: ['@typescript-eslint'],
-  extends: [
-    'eslint:recommended',
-    'plugin:@typescript-eslint/recommended',
-    'prettier',
-  ],
+  extends: ['eslint:recommended', 'plugin:@typescript-eslint/recommended', 'prettier'],
   env: {
     node: true,
     es2022: true,
   },
-  ignorePatterns: ['dist', 'node_modules', '*.cjs', 'tests', 'vitest.config.ts'],
+  ignorePatterns: [
+    'dist',
+    'node_modules',
+    '*.cjs',
+    'tests',
+    'vitest.config.ts',
+    'drizzle.config.ts',
+  ],
 };

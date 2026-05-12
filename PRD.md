@@ -88,7 +88,7 @@ auto-routing that hides what the agent is doing.
 - **LanceDB** — embedded multimodal lakehouse, strong alternative if scale
   matters locally (`cognee.ai`, `mem0.ai` use it as default).
 - **pgvector** — the standard for cloud Postgres deployments.
-- Memory shape from Anthropic's *Effective Context Engineering* (Sep 2025):
+- Memory shape from Anthropic's _Effective Context Engineering_ (Sep 2025):
   treat context as finite; prefer **just-in-time retrieval** over stuffing;
   use **subagent specialization for context isolation**; write durable notes
   to disk between turns rather than rehydrating long histories.
@@ -146,25 +146,26 @@ runtime is required.
 
 ### 1.9 Selected sources (representative)
 
-| Topic | Source |
-|---|---|
-| Claude Code subagents | `code.claude.com/docs/en/sub-agents` |
-| Claude Code hooks | `code.claude.com/docs/en/hooks` |
-| Claude Agent SDK | `npmjs.com/package/@anthropic-ai/claude-agent-sdk`, `code.claude.com/docs/en/headless` |
-| Best practices | `code.claude.com/docs/en/best-practices`, `blog.sshh.io/p/how-i-use-every-claude-code-feature` |
-| Multi-agent research | `anthropic.com/engineering/multi-agent-research-system` |
-| Context engineering | `anthropic.com/engineering/effective-context-engineering-for-ai-agents`, `langchain.com/blog/context-engineering-for-agents` |
-| Framework comparison | `langfuse.com/blog/2025-03-19-ai-agent-comparison`, `composio.dev/content/openai-agents-sdk-vs-langgraph-vs-autogen-vs-crewai`, `openagents.org/blog/posts/2026-02-23-open-source-ai-agent-frameworks-compared` |
-| Durable execution | `inngest.com/blog/durable-execution-key-to-harnessing-ai-agents`, `akka.io/blog/inngest-vs-temporal` |
-| Vector storage | `cognee.ai/blog/fundamentals/how-cognee-builds-ai-memory`, `mem0.ai/blog/crewai-memory-production-setup-with-mem0` |
-| OTel for GenAI | `opentelemetry.io/docs/specs/semconv/gen-ai`, `opentelemetry.io/blog/2025/ai-agent-observability`, `datadoghq.com/blog/llm-otel-semantic-convention` |
-| Evals | `augmentcode.com/tools/best-ai-agent-evaluation-tools`, `braintrust.dev/articles/deepeval-alternatives-2026` |
-| MCP security | `redhat.com/en/blog/model-context-protocol-mcp-understanding-security-risks-and-controls`, `towardsdatascience.com/the-mcp-security-survival-guide-best-practices-pitfalls-and-real-world-lessons`, `embracethered.com/blog/posts/2025/model-context-protocol-security-risks-and-exploits`, `backslash.security/blog/claude-code-security-best-practices` |
-| Claude Max as endpoint | `reddit.com/r/ClaudeAI/comments/1r0ugjm/...`, `linkedin.com/posts/tom-swift_openclaw-claudecode-opensource-...` |
+| Topic                  | Source                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code subagents  | `code.claude.com/docs/en/sub-agents`                                                                                                                                                                                                                                                                                                                      |
+| Claude Code hooks      | `code.claude.com/docs/en/hooks`                                                                                                                                                                                                                                                                                                                           |
+| Claude Agent SDK       | `npmjs.com/package/@anthropic-ai/claude-agent-sdk`, `code.claude.com/docs/en/headless`                                                                                                                                                                                                                                                                    |
+| Best practices         | `code.claude.com/docs/en/best-practices`, `blog.sshh.io/p/how-i-use-every-claude-code-feature`                                                                                                                                                                                                                                                            |
+| Multi-agent research   | `anthropic.com/engineering/multi-agent-research-system`                                                                                                                                                                                                                                                                                                   |
+| Context engineering    | `anthropic.com/engineering/effective-context-engineering-for-ai-agents`, `langchain.com/blog/context-engineering-for-agents`                                                                                                                                                                                                                              |
+| Framework comparison   | `langfuse.com/blog/2025-03-19-ai-agent-comparison`, `composio.dev/content/openai-agents-sdk-vs-langgraph-vs-autogen-vs-crewai`, `openagents.org/blog/posts/2026-02-23-open-source-ai-agent-frameworks-compared`                                                                                                                                           |
+| Durable execution      | `inngest.com/blog/durable-execution-key-to-harnessing-ai-agents`, `akka.io/blog/inngest-vs-temporal`                                                                                                                                                                                                                                                      |
+| Vector storage         | `cognee.ai/blog/fundamentals/how-cognee-builds-ai-memory`, `mem0.ai/blog/crewai-memory-production-setup-with-mem0`                                                                                                                                                                                                                                        |
+| OTel for GenAI         | `opentelemetry.io/docs/specs/semconv/gen-ai`, `opentelemetry.io/blog/2025/ai-agent-observability`, `datadoghq.com/blog/llm-otel-semantic-convention`                                                                                                                                                                                                      |
+| Evals                  | `augmentcode.com/tools/best-ai-agent-evaluation-tools`, `braintrust.dev/articles/deepeval-alternatives-2026`                                                                                                                                                                                                                                              |
+| MCP security           | `redhat.com/en/blog/model-context-protocol-mcp-understanding-security-risks-and-controls`, `towardsdatascience.com/the-mcp-security-survival-guide-best-practices-pitfalls-and-real-world-lessons`, `embracethered.com/blog/posts/2025/model-context-protocol-security-risks-and-exploits`, `backslash.security/blog/claude-code-security-best-practices` |
+| Claude Max as endpoint | `reddit.com/r/ClaudeAI/comments/1r0ugjm/...`, `linkedin.com/posts/tom-swift_openclaw-claudecode-opensource-...`                                                                                                                                                                                                                                           |
 
 ### 1.10 What to adopt vs avoid (one-pager)
 
 **Adopt**
+
 - File-based agent definitions (`.md` + YAML frontmatter), Claude Code–compatible.
 - Orchestrator-worker topology with explicit handoffs.
 - SQLite-first storage; sqlite-vec for embeddings; OTel-shaped traces.
@@ -174,6 +175,7 @@ runtime is required.
 - Promptfoo-compatible eval fixtures.
 
 **Avoid**
+
 - Heavy framework dependencies (LangGraph/AutoGen/Temporal) in the local core.
 - Mandatory cloud services or API keys.
 - Auto-routing/hidden agent selection.
@@ -337,7 +339,7 @@ providers:
   claude_code_local:
     enabled: true
     requires_api_key: false
-    sdk: "@anthropic-ai/claude-agent-sdk"
+    sdk: '@anthropic-ai/claude-agent-sdk'
   anthropic_api:
     enabled: false
     api_key_env: ANTHROPIC_API_KEY
@@ -353,13 +355,13 @@ security:
     network: approval_required
     shell: approval_required
     destructive: deny
-  pinned_mcp_servers: true       # require checksum match
+  pinned_mcp_servers: true # require checksum match
   redact_secrets_in_logs: true
 
 memory:
   enabled: true
   storage: local
-  semantic_search: optional      # sqlite-vec
+  semantic_search: optional # sqlite-vec
   default_scopes: [project, user_preferences]
 
 observability:
@@ -367,10 +369,10 @@ observability:
   traces: true
   otlp_exporter:
     enabled: false
-    endpoint: ""
+    endpoint: ''
 
 approvals:
-  channels: [cli]                # later: web, slack, github
+  channels: [cli] # later: web, slack, github
   default_ttl_minutes: 60
 ```
 
@@ -383,8 +385,8 @@ id: research_agent
 name: Research Agent
 version: 1
 role: Deep web and repository researcher
-provider: claude_code_local       # any provider id
-model: opus                       # optional, provider decides default
+provider: claude_code_local # any provider id
+model: opus # optional, provider decides default
 tools:
   allowed:
     - mcp.crawlforge.search_web
@@ -398,7 +400,7 @@ permissions:
   file_write: approval_required
   shell: deny
 memory:
-  read:  [project, user_preferences]
+  read: [project, user_preferences]
   write: [research_notes]
 eval:
   fixtures: evals/fixtures/research/*.yaml
@@ -407,7 +409,6 @@ eval:
     - identifies tradeoffs
     - compares alternatives
 ---
-
 # Instructions
 
 Use available MCP tools to research deeply. Prefer primary sources. Summarize
@@ -443,22 +444,55 @@ ordered by dependency, not necessarily by calendar.
 
 ---
 
-### Phase 1 — Storage & config layer
+### Phase 1 — Storage & config layer ✅ COMPLETE (2026-05-12)
 
 **Outcome**: SQLite database, migrations, blob store, typed config loader.
 
-- [ ] Add Drizzle ORM + `better-sqlite3` (or `libsql`) driver.
-- [ ] Define migrations for tables in §2.4.
-- [ ] Add content-addressed blob store helper (`writeBlob(buf) → sha256`).
-- [ ] Add config loader that reads `agent-os.config.yaml` and env vars,
+- [x] Add Drizzle ORM + `better-sqlite3` (or `libsql`) driver.
+- [x] Define migrations for tables in §2.4.
+- [x] Add content-addressed blob store helper (`writeBlob(buf) → sha256`).
+- [x] Add config loader that reads `agent-os.config.yaml` and env vars,
       validates with Zod, exposes typed `Config` object.
-- [ ] Add `sqlite-vec` extension load + fallback for environments without it
+- [x] Add `sqlite-vec` extension load + fallback for environments without it
       (semantic search marked disabled in capabilities).
-- [ ] Provide `agent-os init` to scaffold `agents/`, `workflows/`, `evals/`,
+- [x] Provide `agent-os init` to scaffold `agents/`, `workflows/`, `evals/`,
       `.agent-os/` (DB dir), and a default config.
 
-**Exit**: `agent-os init` produces a working repo; tests verify schema + blob
-roundtrip.
+**Exit (met)**: `npm test` green (33 tests across `tests/cli.test.ts`,
+`tests/config.test.ts`, `tests/cli/init.test.ts`, `tests/storage/blobs.test.ts`,
+`tests/storage/schema.test.ts`, `tests/storage/vec.test.ts`); `npm run
+typecheck` and `npm run lint` clean; sqlite-vec loaded successfully and
+`vec_version()` smoke test passes; `agent-os init` scaffolds 12 directories and
+a validated default config; auditor `drizzle-schema-reviewer` returned PASS
+WITH NITS; `verify-no-api-key` gate PASS with `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `CLAUDE_API_KEY` unset.
+
+**Artifacts shipped**: `src/storage/{db.ts,schema.ts,migrate.ts,vec.ts,capabilities.ts,blobs.ts}`,
+`drizzle/migrations/{0001_init.sql,0002_embeddings_vec.sql}`, `drizzle.config.ts`,
+`src/cli/commands/init.ts`, updated `src/cli/index.ts`, updated
+`src/config/index.ts` with env-var overlay (`AGENT_OS_*`), new tests
+`tests/storage/{schema.test.ts,vec.test.ts,blobs.test.ts}` and
+`tests/cli/init.test.ts`, expanded `tests/config.test.ts`, `package.json` adds
+`better-sqlite3`, `drizzle-orm`, `sqlite-vec` (deps) + `drizzle-kit`,
+`@types/better-sqlite3` (dev) + `db:migrate` script. Also fixes
+`.claude/hooks/protect-prd.sh` to read user turns from `transcript_path`
+(the field Claude Code actually provides) rather than the non-existent
+`.session.user_prompt`.
+
+**Known follow-ups** (auditor nits, recorded for later phases):
+
+- Memory scope CHECK constraint is `('global','agent','run')`; Phase 7 will
+  widen to PRD §2.5 scopes and allow user-defined scopes.
+- `embeddings` vec0 dimension is hardcoded `float[1536]`; Phase 7 should make
+  it configurable from `memory.embedding_dim`.
+- `tryLoadVec` should smoke-test `vec_version()` before re-calling
+  `vec.load(sqlite)` to avoid "extension already loaded" on double-probe.
+- `_agent_os_migrations.status` concatenates the failure reason; split into a
+  separate `reason` column.
+- Add `BEFORE UPDATE/DELETE` triggers on `events` to enforce append-only at
+  the DB layer (Phase 12 audit posture).
+- Add explicit no-down rollback note on `0001_init.sql` (forward-only by
+  design for local-first SQLite).
 
 ---
 
@@ -577,7 +611,7 @@ policies; no uncontrolled writes.
 - [ ] Enforce per-agent `memory.read` / `memory.write` allow-lists at the
       provider boundary.
 - [ ] CLI: `memory list <scope>`, `memory show <id>`, `memory write <scope>
-      <key>`, `memory rm <id>`, `memory search "<query>" [--scope ...]`.
+  <key>`, `memory rm <id>`, `memory search "<query>" [--scope ...]`.
 - [ ] Document write policy: append by default; updates require diff; deletes
       are tombstoned, not destructive.
 - [ ] Provide a `MEMORY.md` index pattern compatible with Claude Code's
@@ -811,7 +845,7 @@ Project-level quality bar:
 
 - [ ] Research summary (this PRD §1)
 - [ ] Architecture document (§2 + `docs/architecture.md`)
-- [ ] Data model (§2.4)
+- [x] Data model (§2.4)
 - [ ] Agent configuration schema (§2.6 + Zod)
 - [ ] Workflow configuration schema (Phase 5)
 - [ ] Provider abstraction with Claude Code local mode first (Phase 3)

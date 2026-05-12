@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { Command } from 'commander';
+import { buildInitCommand } from './commands/init.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -36,6 +37,8 @@ export function buildProgram(): Command {
       process.stdout.write('agent-os: ok\n');
     });
 
+  program.addCommand(buildInitCommand());
+
   return program;
 }
 
@@ -46,9 +49,11 @@ function isMainModule(): boolean {
 }
 
 if (isMainModule()) {
-  buildProgram().parseAsync(process.argv).catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`agent-os: ${message}\n`);
-    process.exit(1);
-  });
+  buildProgram()
+    .parseAsync(process.argv)
+    .catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`agent-os: ${message}\n`);
+      process.exit(1);
+    });
 }

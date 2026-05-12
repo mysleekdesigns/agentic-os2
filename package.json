@@ -16,18 +16,24 @@
     "test": "vitest run",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "tsx src/storage/migrate.ts"
   },
   "dependencies": {
+    "better-sqlite3": "^11.0.0",
     "commander": "^12.1.0",
+    "drizzle-orm": "^0.36.0",
     "js-yaml": "^4.1.0",
+    "sqlite-vec": "^0.1.6",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.14.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
+    "drizzle-kit": "^0.28.0",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
     "prettier": "^3.3.3",
