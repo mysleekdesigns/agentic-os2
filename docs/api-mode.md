@@ -143,11 +143,16 @@ traces. The repo enforces this in three places:
   exporter via `spanToPersistedJson`, so an external collector receives the
   same sanitised payload that lands on disk.
 
-The policy is wired in `agent-os.config.yaml` under `security`:
+The policy is wired in `agent-os.config.yaml` under `security`. The optional
+`secret_patterns` list lets operators extend the built-in vendor patterns
+with workspace-specific regexes — e.g. a corporate token format — so that
+in-house API keys are redacted alongside the shipped ones.
 
 ```yaml
 security:
   redact_secrets_in_logs: true
+  secret_patterns:
+    - 'corp_[A-Za-z0-9]{32}'
 ```
 
 See `docs/security.md` for the full audit-log shape and the

@@ -90,6 +90,17 @@ The repository ships three templates under `agents/templates/`:
 Each template is a minimal, deny-by-default starting point. Customize freely;
 keep the PRD §2.6 frontmatter shape intact so the loader accepts it.
 
+## Verifying the local install
+
+Run `agent-os doctor` to confirm config, providers, MCP, and the SQLite
+schema are wired up on this machine; add `--security` to also exercise the
+sandbox, deny-by-default policy, and secret-redaction guard rails (Phase 12).
+Both subcommands work on Max with no API key set.
+
+For working starting points beyond the registry templates, see the shipped
+workflow examples under `workflows/examples/` and the three agent templates
+under `agents/templates/`.
+
 ## Status
 
 Phase 2. The registry loader, the `agent sync` mirror command, and these

@@ -1075,20 +1075,34 @@ to auditor), `tests/security/sandbox.test.ts`,
 
 ---
 
-### Phase 13 — Examples, templates, documentation
+### Phase 13 — Examples, templates, documentation ✅ COMPLETE (2026-05-12)
 
 **Outcome**: A new user can go from zero to a working agent in <10 minutes,
 following docs, on Claude Code Max.
 
-- [ ] `docs/claude-code-max.md` — full Max-plan local setup (no API key).
-- [ ] `docs/api-mode.md` — turning on API providers.
-- [ ] `docs/architecture.md` — final architecture, sequence diagrams.
-- [ ] `docs/security.md` + `docs/threat-model.md`.
-- [ ] `docs/examples.md` — walk through each example agent + workflow.
-- [ ] At minimum 3 example agents, 2 example workflows, 2 eval fixture suites.
-- [ ] README rewrite with quickstart aimed at Max users.
+- [x] `docs/claude-code-max.md` — full Max-plan local setup (no API key).
+- [x] `docs/api-mode.md` — turning on API providers.
+- [x] `docs/architecture.md` — final architecture, sequence diagrams.
+- [x] `docs/security.md` + `docs/threat-model.md`.
+- [x] `docs/examples.md` — walk through each example agent + workflow.
+- [x] At minimum 3 example agents, 2 example workflows, 2 eval fixture suites.
+- [x] README rewrite with quickstart aimed at Max users.
 
-**Exit**: Docs reviewed; example agents pass their own evals.
+**Exit (met)**: All seven doc artifacts exist with cross-links; README leads
+with a Max-mode quickstart and a CLI reference table that matches
+`src/cli/commands/`; `docs/architecture.md` now carries three ASCII sequence
+diagrams (agent run, approval queue, workflow step) plus a Cross-cutting
+concerns section (policy, redaction, observability); `docs/examples.md` walks
+all 3 agents and 2 workflows with real CLI invocations. Example agents have
+shipped fixtures under `evals/fixtures/<id>/smoke.yaml` (3 suites). Auditor
+`eval-fixture-author` returned PASS after the BLOCK on README workflow-id
+usage and a stale `cmdRun` cite in architecture.md were fixed.
+
+**Artifacts shipped**: `docs/examples.md` (new), `docs/architecture.md`
+(sequence diagrams + cross-cutting concerns), `docs/claude-code-max.md`
+(verifying-the-local-install section), `docs/api-mode.md` (`secret_patterns`
+note), `README.md` (rewrite — Max-mode quickstart, API-mode pointer,
+examples, CLI reference, project structure, docs index).
 
 ---
 
@@ -1205,7 +1219,7 @@ Project-level quality bar:
 - [ ] CLI interface (Phase 10)
 - [ ] Tests (Phase 14)
 - [x] Example agents (Phases 2 + 13)
-- [ ] Example workflows (Phases 5 + 13) — Phase 5 portion done
-- [ ] Documentation for Claude Code Max users (Phase 13)
-- [ ] Documentation for API users (Phase 13)
+- [x] Example workflows (Phases 5 + 13)
+- [x] Documentation for Claude Code Max users (Phase 13)
+- [x] Documentation for API users (Phase 13)
 - [x] Security notes and threat model (Phase 12)
