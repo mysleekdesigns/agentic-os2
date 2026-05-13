@@ -1,0 +1,51 @@
+version: '3.9'
+
+# Minimal Agent OS compose stack.
+#
+# - `agent-os` is the CLI container. It mounts ./workspace at /data so the
+#   SQLite DB and any user-defined agents/workflows persist across runs.
+# - The dashboard service (Phase 15) is sketched but commented out; it
+#   currently ships as a Next.js app under web/ with its own build. See
+#   docs/deployment.md "Dashboard in a container" for the deferred plan.
+
+services:
+  agent-os:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agent-os:local
+    container_name: agent-os
+    # Override CMD to run a specific agent, e.g.:
+    #   command: ["run", "code_reviewer", "review the diff"]
+    # Default is `doctor` (matches the Dockerfile CMD).
+    command: ['doctor']
+    volumes:
+      - ./workspace:/data
+    environment:
+      # Keep claude_code_local as the default provider (no API key needed).
+      AGENT_OS_PROVIDER: claude_code_local
+      # Override the DB path if you want it outside /data:
+      # AGENT_OS_DB: /data/agent-os.sqlite
+      # Pass API keys via --env-file or secrets in production:
+      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # OPENAI_API_KEY:    ${OPENAI_API_KEY:-}
+    # No published ports - this is a CLI container by default.
+
+  # ---------------------------------------------------------------------------
+  # Optional: web dashboard (Phase 15). Uncomment when a web/Dockerfile lands.
+  # ---------------------------------------------------------------------------
+  # dashboard:
+  #   build:
+  #     context: .
+  #     dockerfile: web/Dockerfile     # placeholder; not shipped yet
+  #   image: agent-os-dashboard:local
+  #   ports: ["3030:3030"]
+  #   environment:
+  #     AGENT_OS_DB: /data/agent-os.sqlite
+  #     # Required whenever the dashboard binds beyond loopback. See
+  #     # docs/security.md and docs/cloud-path.md.
+  #     AGENT_OS_DASHBOARD_TOKEN: ${AGENT_OS_DASHBOARD_TOKEN:?must be set for non-loopback bind}
+  #   volumes:
+  #     - ./workspace:/data
+  #   depends_on:
+  #     - agent-os

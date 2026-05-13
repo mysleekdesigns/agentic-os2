@@ -1,0 +1,43 @@
+# Build artifacts
+node_modules
+dist
+coverage
+cache
+snapshots
+
+# VCS / CI
+.git
+.gitignore
+.github
+
+# Local workspace state (per-developer; never bake into image)
+.agent-os
+jobs
+webhooks
+
+# Web dashboard (Phase 15) ships as its own workspace; not part of the
+# core CLI image. Keep it out of the build context to slim the build.
+.next
+web/node_modules
+web/.next
+web/dist
+
+# Docs, tests, fixtures we don't want in the runtime image
+docs
+tests
+*.test.ts
+*.spec.ts
+
+# Logs / env / editor cruft
+*.log
+.env
+.env.*
+.DS_Store
+.vscode
+.idea
+
+# Docker build itself
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml

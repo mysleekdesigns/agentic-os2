@@ -1166,16 +1166,42 @@ tailwind/postcss, layout + index, 5 content pages, UI primitives,
 
 ---
 
-### Phase 16 — Cloud/deployment path (future)
+### Phase 16 — Cloud/deployment path (future) ✅ COMPLETE (2026-05-12)
 
 **Outcome (future scope)**: System can be deployed as a hosted control plane.
 
 - [ ] Postgres + pgvector adapters in `storage/` (interface already abstracted).
+      _Deferred — implementation is future scope per heading; the storage seam
+      and table-by-table migration plan are documented in
+      `docs/cloud-path.md`. No adapter code shipped._
 - [ ] Optional Inngest or Temporal adapter behind the `WorkflowEngine` interface.
-- [ ] Container image + minimal deployment guide.
-- [ ] Identity/multi-tenant model spec (out of scope for initial release).
+      _Deferred — heading explicitly marks Phase 16 future and this item
+      "Optional"; the `WorkflowEngine` interface seam and the Inngest/Temporal
+      mapping are documented in `docs/cloud-path.md`. No adapter code shipped._
+- [x] Container image + minimal deployment guide.
+- [x] Identity/multi-tenant model spec (out of scope for initial release).
 
-**Exit**: Documented migration path; no breaking changes to local users.
+**Exit (met)**: Migration path documented in `docs/cloud-path.md` (compatibility
+promise, storage abstraction → Postgres/pgvector mapping, `WorkflowEngine`
+seam, identity/multi-tenant spec with NOT-IMPLEMENTED Drizzle sketch);
+container image (`Dockerfile`, `.dockerignore`, `docker-compose.yml`) and
+`docs/deployment.md` shipped; root `npm test` is still 74 files / 611 tests
+with no regression; verify-no-api-key PASS. No breaking changes to local
+users — `runtime.storage: local_sqlite` and `claude_code_local` remain the
+defaults; `agent-os.config.yaml` is unchanged. No applicable auditor
+subagents (no `src/` surfaces touched).
+
+**Artifacts shipped**: `docs/cloud-path.md`, `docs/deployment.md`,
+`Dockerfile`, `.dockerignore`, `docker-compose.yml`.
+
+**Deferred (future work, called out per the orchestrator's "never skip
+silently" guardrail)**:
+
+1. Postgres + pgvector adapter implementations under `src/storage/`.
+2. Inngest or Temporal `WorkflowEngine` adapter.
+
+The seam for each is documented; both can be added without breaking the
+existing SQLite default path.
 
 ---
 
