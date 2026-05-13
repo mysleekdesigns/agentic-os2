@@ -17,6 +17,7 @@ module.exports = {
   ignorePatterns: [
     'dist',
     'node_modules',
+    'coverage',
     '*.cjs',
     'tests',
     'vitest.config.ts',

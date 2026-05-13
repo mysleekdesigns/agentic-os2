@@ -1106,19 +1106,32 @@ examples, CLI reference, project structure, docs index).
 
 ---
 
-### Phase 14 — Tests
+### Phase 14 — Tests ✅ COMPLETE (2026-05-12)
 
 **Outcome**: Confidence that the core does not regress as the system grows.
 
-- [ ] Unit tests for: config loader, agent loader, policy engine, blob store,
+- [x] Unit tests for: config loader, agent loader, policy engine, blob store,
       memory scopes, workflow executor.
-- [ ] Integration tests with a fake `Provider` that emits scripted events,
+- [x] Integration tests with a fake `Provider` that emits scripted events,
       covering: tool denial, approval flow, resume after crash, retry,
       memory enforcement, eval scoring.
-- [ ] Smoke test that boots the CLI and runs `agent-os doctor`.
-- [ ] CI workflow that runs lint + tests on every push.
+- [x] Smoke test that boots the CLI and runs `agent-os doctor`.
+- [x] CI workflow that runs lint + tests on every push.
 
-**Exit**: `npm test` green; coverage report exists; CI badge in README.
+**Exit (met)**: `npm test` green — 72 files / 594 tests (+9 over Phase 13);
+coverage configured via `@vitest/coverage-v8` (v8 reporter set, ~83% lines /
+93% functions on the current core) with `npm run test:coverage`; CI badge
+points at `.github/workflows/ci.yml` running typecheck + lint + coverage on
+Node 20 and 22 matrices and uploading the `coverage/` artifact; new
+consolidated integration suite at `tests/integration/phase14-pipeline.test.ts`
+covers all six PRD scenarios (a)–(f) including a real crash-resume against
+on-disk SQLite. No applicable auditor subagents for this phase.
+
+**Artifacts shipped**: `.github/workflows/ci.yml`, `.npmrc` (legacy-peer-deps
+for the zod v3/v4 ecosystem split), `vitest.config.ts` (coverage block),
+`package.json` + `package-lock.json` (`@vitest/coverage-v8`, `test:coverage`
+script), `README.md` (CI badge), `.eslintrc.cjs` (ignore `coverage/`),
+`tests/integration/phase14-pipeline.test.ts` (new).
 
 ---
 
@@ -1217,7 +1230,7 @@ Project-level quality bar:
 - [x] Observability/logging layer (Phase 8)
 - [x] Eval framework (Phase 9)
 - [ ] CLI interface (Phase 10)
-- [ ] Tests (Phase 14)
+- [x] Tests (Phase 14)
 - [x] Example agents (Phases 2 + 13)
 - [x] Example workflows (Phases 5 + 13)
 - [x] Documentation for Claude Code Max users (Phase 13)

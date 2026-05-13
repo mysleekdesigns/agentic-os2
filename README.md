@@ -1,5 +1,7 @@
 # Agent OS
 
+[![CI](https://github.com/mysleekdesigns/agentic-os2/actions/workflows/ci.yml/badge.svg?branch=development)](https://github.com/mysleekdesigns/agentic-os2/actions/workflows/ci.yml)
+
 A local-first, Claude Code Max–compatible developer operating layer for
 creating, coordinating, observing, securing, evaluating, and improving AI
 agents. Agent OS builds on top of Claude Code's native subagent, hook, and MCP
