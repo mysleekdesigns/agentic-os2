@@ -26,6 +26,8 @@ export async function ensureBuiltinProvidersRegistered(
   config: Record<string, unknown> = {},
 ): Promise<void> {
   await tryRegister('../../providers/claude_code_local/index.js', config);
+  await tryRegister('../../providers/anthropic_api/index.js', config);
+  await tryRegister('../../providers/openai_api/index.js', config);
 }
 
 async function tryRegister(modulePath: string, config: Record<string, unknown>): Promise<void> {

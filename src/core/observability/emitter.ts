@@ -22,6 +22,7 @@
 
 import type { AgentOsDb } from '../../storage/db.js';
 import { traces } from '../../storage/schema.js';
+import { redactSecretValues } from '../tools/audit.js';
 import { genSpanId, genTraceId, newSpan, addEvent, endSpan } from './spans.js';
 import type { AttributeValue, SpanContext, SpanKind, SpanRecord, SpanStatus } from './types.js';
 
@@ -101,6 +102,16 @@ export function createSpanEmitter(opts: SpanEmitterOptions): SpanEmitter {
 
   const persist = (span: SpanRecord): void => {
     try {
+      // Scrub the persisted copy only. In-flight spans keep accurate values
+      // (live tools may need to look up an unredacted attribute); we only
+      // sanitize on the way to disk so a leaked env-var key value never
+      // surfaces in `traces.otel_span_json`. Events carry their own
+      // attribute bag, so each one gets the same treatment.
+      const scrubbedAttrs = redactSecretValues(span.attributes) as Record<string, AttributeValue>;
+      const scrubbedEvents = span.events.map((evt) => ({
+        ...evt,
+        attributes: redactSecretValues(evt.attributes) as Record<string, AttributeValue>,
+      }));
       const payload: PersistedSpan = {
         context: span.ctx,
         kind: span.kind,
@@ -108,8 +119,8 @@ export function createSpanEmitter(opts: SpanEmitterOptions): SpanEmitter {
         startTimeMs: span.startTimeMs,
         endTimeMs: span.endTimeMs ?? null,
         status: span.status,
-        attributes: span.attributes,
-        events: span.events,
+        attributes: scrubbedAttrs,
+        events: scrubbedEvents,
         links: span.links,
       };
       const json = JSON.stringify(payload);
@@ -206,6 +217,13 @@ export function createSpanEmitter(opts: SpanEmitterOptions): SpanEmitter {
 // ---------------------------------------------------------------------------
 
 export function spanToPersistedJson(span: SpanRecord): string {
+  // Mirror the redaction policy in `persist` above so the OTLP exporter
+  // ships the same scrubbed shape that lands in `traces.otel_span_json`.
+  const scrubbedAttrs = redactSecretValues(span.attributes) as Record<string, AttributeValue>;
+  const scrubbedEvents = span.events.map((evt) => ({
+    ...evt,
+    attributes: redactSecretValues(evt.attributes) as Record<string, AttributeValue>,
+  }));
   const payload: PersistedSpan = {
     context: span.ctx,
     kind: span.kind,
@@ -213,8 +231,8 @@ export function spanToPersistedJson(span: SpanRecord): string {
     startTimeMs: span.startTimeMs,
     endTimeMs: span.endTimeMs ?? null,
     status: span.status,
-    attributes: span.attributes,
-    events: span.events,
+    attributes: scrubbedAttrs,
+    events: scrubbedEvents,
     links: span.links,
   };
   return JSON.stringify(payload);

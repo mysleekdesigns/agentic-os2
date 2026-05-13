@@ -204,37 +204,124 @@ const SECRET_VALUE_RES: readonly RegExp[] = [
 ];
 
 /**
+ * Env-var names whose live values are stripped from any string before the
+ * pattern-based scrubbers run (PRD §3 Phase 11 — Secrets handling).
+ *
+ * The list is intentionally short and provider-shaped: a future adapter that
+ * lands a new key env-var should extend it here. We keep it conservative so
+ * `redactSecrets` does not turn into a generic env-redactor — that would
+ * surprise operators whose unrelated env contains common substrings.
+ */
+const GUARDED_ENV_NAMES: readonly string[] = [
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'CLAUDE_API_KEY',
+];
+
+/**
+ * Minimum length below which a guarded env value is ignored for substring
+ * redaction. Real Anthropic/OpenAI keys are far longer than this; the guard
+ * is cheap defence against accidentally redacting an unrelated short value
+ * that happens to share a name with a key env-var in a test.
+ */
+const MIN_GUARDED_SECRET_LEN = 12;
+
+/**
+ * Build the live set of guarded secret values from `env` (defaults to
+ * `process.env`). Resolved per `redactSecrets` call rather than cached at
+ * module load: a long-lived process may have an env-var injected, rotated,
+ * or unset between calls, and stale caching would leak the newer key or
+ * waste work scrubbing a value that is no longer secret.
+ *
+ * Filters out empty values and values below `MIN_GUARDED_SECRET_LEN`.
+ * De-duplicates so the substitution pass touches the string once per
+ * distinct secret.
+ */
+export function getGuardedSecrets(env: NodeJS.ProcessEnv = process.env): string[] {
+  const seen = new Set<string>();
+  for (const name of GUARDED_ENV_NAMES) {
+    const v = env[name];
+    if (typeof v !== 'string') continue;
+    if (v.length < MIN_GUARDED_SECRET_LEN) continue;
+    seen.add(v);
+  }
+  return [...seen];
+}
+
+/**
  * Recursively redact common secret shapes from a JSON-serialisable value.
  *
- * Two complementary passes:
+ * Three complementary passes:
+ *  - live env-var values (PRD Phase 11) for the providers in
+ *    `GUARDED_ENV_NAMES` → matched substring replaced with `<redacted>`
+ *    (catches a raw `ANTHROPIC_API_KEY` accidentally echoed into a header or
+ *    tool result, regardless of surrounding context)
  *  - object keys matching SECRET_KEY_RE → value replaced with `<redacted>`
  *    (catches `api_key`, `password`, `auth_token`, etc. regardless of value)
  *  - string values matching SECRET_VALUE_RES → matched substring replaced with
  *    `<redacted>` (catches credentials embedded in args/results/URLs)
  *
- * Pure: returns a new value tree; the input is not mutated. Phase 4 ships a
- * coarse passlist — Phase 12 (PRD §2.5) will move the rules into config.
+ * The env pass runs first because a live key value is the strongest signal
+ * and we want it scrubbed even if the surrounding pattern heuristics fail.
+ *
+ * Pure: returns a new value tree; the input is not mutated. The optional
+ * `env` argument lets tests inject a synthetic env; production callers should
+ * omit it so `process.env` is read at call time (env mutability — see
+ * `getGuardedSecrets`). Phase 4 ships a coarse passlist; Phase 12 (PRD §2.5)
+ * will move the rules into config.
  */
-export function redactSecrets(value: unknown): unknown {
+export function redactSecrets(value: unknown, env?: NodeJS.ProcessEnv): unknown {
+  const secrets = getGuardedSecrets(env);
+  return redactWith(value, secrets, true);
+}
+
+/**
+ * Like `redactSecrets`, but skips the key-name pass. Use when the keys are
+ * known-safe (e.g. OTel GenAI attribute names such as
+ * `gen_ai.usage.input_tokens`, which contain the substring "token" purely as
+ * part of a metric name). String values still run through both env-value and
+ * vendor-pattern scrubbing.
+ *
+ * Added in Phase 11 so the span emitter can scrub leaked env-var values from
+ * persisted trace attributes without falsely redacting standardised metric
+ * keys.
+ */
+export function redactSecretValues(value: unknown, env?: NodeJS.ProcessEnv): unknown {
+  const secrets = getGuardedSecrets(env);
+  return redactWith(value, secrets, false);
+}
+
+function redactWith(value: unknown, secrets: readonly string[], keyPass: boolean): unknown {
   if (value === null || value === undefined) return value;
-  if (typeof value === 'string') return redactString(value);
+  if (typeof value === 'string') return redactString(value, secrets);
   if (typeof value !== 'object') return value;
   if (Array.isArray(value)) {
-    return value.map((v) => redactSecrets(v));
+    return value.map((v) => redactWith(v, secrets, keyPass));
   }
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    if (SECRET_KEY_RE.test(k)) {
+    if (keyPass && SECRET_KEY_RE.test(k)) {
       out[k] = REDACTED;
     } else {
-      out[k] = redactSecrets(v);
+      out[k] = redactWith(v, secrets, keyPass);
     }
   }
   return out;
 }
 
-function redactString(s: string): string {
+function redactString(s: string, secrets: readonly string[] = getGuardedSecrets()): string {
   let out = s;
+  // Strip raw env-var values first so the pattern-based scrubbers below never
+  // see a leaked key in passing (e.g. an `sk-…` value that happened to fall
+  // just under the pattern's minimum length).
+  for (const secret of secrets) {
+    if (secret.length < MIN_GUARDED_SECRET_LEN) continue;
+    // `split/join` performs a literal (non-regex) global replacement, which
+    // is what we want — secret values may contain regex metacharacters.
+    if (out.includes(secret)) {
+      out = out.split(secret).join(REDACTED);
+    }
+  }
   for (const re of SECRET_VALUE_RES) {
     out = out.replace(re, REDACTED);
   }

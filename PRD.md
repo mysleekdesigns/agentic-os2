@@ -982,22 +982,51 @@ tests `tests/cli/{agent-new,tools,provider,doctor,version}.test.ts`
 
 ---
 
-### Phase 11 — Optional API/cloud providers
+### Phase 11 — Optional API/cloud providers ✅ COMPLETE (2026-05-12)
 
 **Outcome**: Users with API keys can run any agent against Anthropic or OpenAI
 without changing the agent definition.
 
-- [ ] Implement `anthropic_api` provider using the Anthropic SDK; full
+- [x] Implement `anthropic_api` provider using the Anthropic SDK; full
       tool-use loop; prompt caching enabled by default; streaming.
-- [ ] Implement `openai_api` provider using the OpenAI SDK; map tools; mark
+- [x] Implement `openai_api` provider using the OpenAI SDK; map tools; mark
       Anthropic-only capability flags unavailable.
-- [ ] Secrets handling: keys come from env (`ANTHROPIC_API_KEY`,
+- [x] Secrets handling: keys come from env (`ANTHROPIC_API_KEY`,
       `OPENAI_API_KEY`); never written to logs; redacted in traces.
-- [ ] Provider capability matrix documented in `docs/api-mode.md`.
-- [ ] CLI: `agent-os provider enable <id>` writes back to config.
+- [x] Provider capability matrix documented in `docs/api-mode.md`.
+- [x] CLI: `agent-os provider enable <id>` writes back to config.
 
-**Exit**: The same `research_agent` can be flipped to `anthropic_api` via one
-config line and behaves identically (modulo cost telemetry now populated).
+**Exit (met)**: `src/providers/anthropic_api/` streams the Messages API
+with `cache_control: ephemeral` on every system prompt (prompt caching on
+by default), sanitises dotted tool names so canonical ids like `fs.read`
+round-trip safely, populates honest `tokens` + `cost` (table-priced; null
+for unknown models). `src/providers/openai_api/` streams Chat Completions
+with `stream_options.include_usage`, maps tool names with `.` → `_` and
+restores the original id on `tool_call` events, filters MCP ids (capability
+matrix marks `mcp:false` for both API providers). Both adapters emit a
+clean `error` + `done(reason:'error')` when their env key is missing
+instead of throwing. `redactSecrets` now scrubs live `ANTHROPIC_API_KEY` /
+`OPENAI_API_KEY` / `CLAUDE_API_KEY` VALUES from persisted span attributes
+(via `redactSecretValues` wired into `src/core/observability/emitter.ts`).
+`docs/api-mode.md` ships the 6-row capability matrix that matches
+`defaultCapabilitiesFor` exactly. `agent-os provider enable` already
+landed in Phase 10. 539 tests pass (42 new across `tests/providers/
+{anthropic_api,openai_api}/` and `tests/core/tools/redact-env-secrets.
+test.ts`); typecheck + lint clean; `verify-no-api-key` PASS.
+Auditor `provider-capability-auditor`: PASS WITH NITS — substantive
+finding (Anthropic tool-name sanitisation) fixed before commit; remaining
+nits are informational follow-ups.
+
+**Artifacts shipped**: `src/providers/anthropic_api/{adapter,index,types}.ts`;
+`src/providers/openai_api/{adapter,index}.ts`;
+`src/core/providers/index.ts` (`ensureBuiltinProvidersRegistered` now
+loads both new adapters); `src/core/tools/audit.ts` (env-value redaction
+
+- `redactSecretValues`); `src/core/observability/emitter.ts` (persist /
+  OTLP scrubbing); `docs/api-mode.md`; tests under
+  `tests/providers/{anthropic_api,openai_api}/` and
+  `tests/core/tools/redact-env-secrets.test.ts` (42 new tests). Direct deps
+  added: `@anthropic-ai/sdk@^0.81.0`, `openai@^6.37.0`.
 
 ---
 
@@ -1144,7 +1173,7 @@ Project-level quality bar:
 - [x] Agent configuration schema (§2.6 + Zod)
 - [x] Workflow configuration schema (Phase 5)
 - [x] Provider abstraction with Claude Code local mode first (Phase 3)
-- [ ] Optional API provider implementations (Phase 11)
+- [x] Optional API provider implementations (Phase 11)
 - [x] Tool/MCP permission model (Phase 4 + §1.7)
 - [x] Task orchestration engine (Phase 5)
 - [x] Memory abstraction (Phase 7)
