@@ -1030,26 +1030,48 @@ loads both new adapters); `src/core/tools/audit.ts` (env-value redaction
 
 ---
 
-### Phase 12 — Security hardening
+### Phase 12 — Security hardening ✅ COMPLETE (2026-05-12)
 
 **Outcome**: System ships with sensible defaults and a written threat model.
 
-- [ ] Write `docs/threat-model.md` covering: prompt injection via tool output,
+- [x] Write `docs/threat-model.md` covering: prompt injection via tool output,
       tool poisoning, confused deputy, MCP supply chain, secret exfiltration
       via memory, log leakage, sandbox escape via shell tools.
-- [ ] Default deny for shell + destructive tools.
-- [ ] Redact secrets in trace persistence (allow-list of regex patterns
+- [x] Default deny for shell + destructive tools.
+- [x] Redact secrets in trace persistence (allow-list of regex patterns
       configurable in `agent-os.config.yaml`).
-- [ ] Sandboxed shell execution helper (cwd whitelist, command allow-list).
-- [ ] MCP server allow-list with optional checksum pinning; warn on
+- [x] Sandboxed shell execution helper (cwd whitelist, command allow-list).
+- [x] MCP server allow-list with optional checksum pinning; warn on
       unverified servers.
-- [ ] Hook tying everything together: `PreToolUse` runs the policy engine for
+- [x] Hook tying everything together: `PreToolUse` runs the policy engine for
       both Claude Code native runs and SDK-driven runs.
-- [ ] Security test fixtures: deliberately malicious tool output to verify
+- [x] Security test fixtures: deliberately malicious tool output to verify
       isolation.
 
-**Exit**: Threat-model doc reviewed; security tests pass; `agent-os doctor
---security` reports clean.
+**Exit (met)**: `docs/threat-model.md` covers all 7 PRD threats with
+implementation cross-links; 585 tests pass (29 new across `defaults`,
+`redact-config-patterns`, `secret-patterns`, `sandbox`, `doctor-security`,
+`malicious-tool-output`, and an OTLP-redaction pin); `agent-os doctor
+--security` ships and exits 0 on a workspace whose `.mcp.json` is correctly
+pinned. Auditors `mcp-security-auditor` and `provider-capability-auditor` both
+returned PASS WITH NITS (orchestrator closed the OTLP-egress nit in this
+phase).
+
+**Artifacts shipped**: `docs/threat-model.md`, `src/security/sandbox.ts`,
+`src/security/index.ts`, `.claude/hooks/policy-runtime.sh` (+ `.claude/settings.json`
+registration), `src/cli/commands/doctor.ts` (`--security` flag,
+`DoctorReportSecurity`), `src/config/schema.ts` (`secret_patterns` field with
+load-time regex validation), `src/core/tools/audit.ts` (configurable
+`extraPatterns` via `RedactOptions`; `secretPatterns` on auditor),
+`src/core/observability/emitter.ts` (OTLP exporter receives scrubbed spans;
+`secretPatterns` plumbed through `createObservabilityFromConfig`),
+`src/cli/commands/init.ts` + `agent-os.config.yaml` (scaffold ships
+`secret_patterns: []`), `src/cli/commands/run.ts` (threads `secret_patterns`
+to auditor), `tests/security/sandbox.test.ts`,
+`tests/security/malicious-tool-output.test.ts`,
+`tests/cli/doctor-security.test.ts`,
+`tests/core/tools/redact-config-patterns.test.ts`,
+`tests/core/tools/defaults.test.ts`, `tests/config/secret-patterns.test.ts`.
 
 ---
 
@@ -1186,4 +1208,4 @@ Project-level quality bar:
 - [ ] Example workflows (Phases 5 + 13) — Phase 5 portion done
 - [ ] Documentation for Claude Code Max users (Phase 13)
 - [ ] Documentation for API users (Phase 13)
-- [ ] Security notes and threat model (Phase 12)
+- [x] Security notes and threat model (Phase 12)

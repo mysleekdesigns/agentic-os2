@@ -62,6 +62,7 @@ security:
     destructive: deny
   pinned_mcp_servers: true
   redact_secrets_in_logs: true
+  secret_patterns: []           # extra regex patterns; values matching are replaced with <redacted>
 
 memory:
   enabled: true

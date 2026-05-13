@@ -73,12 +73,43 @@ export const RiskLevelsSchema = z
   .strict();
 export type RiskLevels = z.infer<typeof RiskLevelsSchema>;
 
+/**
+ * Validate that every entry of `secret_patterns` compiles as a JS regex. We
+ * reject invalid patterns at config-load time so operators see a clear error
+ * (Phase 12 — Security hardening). At redaction time the audit layer is more
+ * forgiving (skips invalid patterns silently) so a stale on-disk config never
+ * tanks a live run.
+ */
+const SecretPatternsSchema = z
+  .array(z.string())
+  .default([])
+  .superRefine((patterns, ctx) => {
+    patterns.forEach((pattern, index) => {
+      try {
+        new RegExp(pattern);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index],
+          message: `secret_patterns[${index}] is not a valid regex: ${message}`,
+        });
+      }
+    });
+  });
+
 export const SecurityConfigSchema = z
   .object({
     default_tool_policy: z.enum(['allow', 'deny']).default('deny'),
     risk_levels: RiskLevelsSchema.default({}),
     pinned_mcp_servers: z.boolean().default(true),
     redact_secrets_in_logs: z.boolean().default(true),
+    /**
+     * Operator-supplied regex patterns whose matches are scrubbed to
+     * `<redacted>` during trace/audit persistence. Patterns are validated
+     * here (load time) and applied alongside the built-in vendor regexes.
+     */
+    secret_patterns: SecretPatternsSchema,
   })
   .strict();
 export type SecurityConfig = z.infer<typeof SecurityConfigSchema>;

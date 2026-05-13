@@ -75,6 +75,7 @@ export interface RunAgentInternals {
     provider: string;
     model: string;
     redactSecrets: boolean;
+    secretPatterns?: readonly string[];
   }) => Promise<SqliteAuditor | ToolAuditor | null> | SqliteAuditor | ToolAuditor | null;
   approvalResolverFactory?: (options: RunCliOptions) => ApprovalResolver;
 }
@@ -204,6 +205,7 @@ export async function runAgent(
           provider: providerName,
           model: modelName,
           redactSecrets: config.security.redact_secrets_in_logs,
+          secretPatterns: config.security.secret_patterns,
         });
       } else {
         auditor = await defaultAuditorFactory({
@@ -212,6 +214,7 @@ export async function runAgent(
           provider: providerName,
           model: modelName,
           redactSecrets: config.security.redact_secrets_in_logs,
+          secretPatterns: config.security.secret_patterns,
         });
       }
       auditorIsFinalizable = auditor !== null && isSqliteAuditor(auditor);
@@ -427,6 +430,7 @@ async function defaultAuditorFactory(args: {
   provider: string;
   model: string;
   redactSecrets?: boolean;
+  secretPatterns?: readonly string[];
 }): Promise<SqliteAuditor> {
   const dbDir = join(args.workspaceRoot, '.agent-os');
   const dbPath = join(dbDir, 'db.sqlite');
@@ -446,6 +450,9 @@ async function defaultAuditorFactory(args: {
     provider: args.provider,
     model: args.model,
     ...(args.redactSecrets !== undefined ? { redactSecrets: args.redactSecrets } : {}),
+    ...(args.secretPatterns && args.secretPatterns.length > 0
+      ? { secretPatterns: args.secretPatterns }
+      : {}),
   });
 }
 

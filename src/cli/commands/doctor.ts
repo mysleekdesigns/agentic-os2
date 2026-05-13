@@ -13,6 +13,7 @@
  * config, provider status, MCP server health, and DB version."
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -20,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 
 import { loadConfig } from '../../config/index.js';
-import type { AgentOsConfig, ProvidersConfig } from '../../config/index.js';
+import type { AgentOsConfig, ProvidersConfig, RiskAction } from '../../config/index.js';
 import { openDatabase } from '../../storage/db.js';
 import {
   defaultCapabilitiesFor,
@@ -80,6 +81,7 @@ interface DoctorReportMcpServer {
   name: string;
   command: string;
   commandOnPath: boolean;
+  command_sha256: string | null;
   ok: boolean;
   reason?: string;
 }
@@ -88,6 +90,24 @@ interface DoctorReportMcp {
   file: string;
   found: boolean;
   servers: DoctorReportMcpServer[];
+}
+
+interface DoctorReportMcpServerSecurity {
+  name: string;
+  declared: boolean;
+  hasChecksum: boolean;
+  checksumOk: boolean | null;
+  reason?: string;
+}
+
+export interface DoctorReportSecurity {
+  default_tool_policy: 'allow' | 'deny';
+  risk_levels: Record<'read' | 'write' | 'network' | 'shell' | 'destructive', RiskAction>;
+  pinned_mcp_servers: boolean;
+  redact_secrets_in_logs: boolean;
+  mcpServers: DoctorReportMcpServerSecurity[];
+  findings: string[];
+  ok: boolean;
 }
 
 interface DoctorReportDb {
@@ -112,11 +132,13 @@ export interface DoctorReport {
   mcp: DoctorReportMcp;
   db: DoctorReportDb;
   versions: DoctorReportVersions;
+  security: DoctorReportSecurity | null;
   warnings: string[];
 }
 
 interface DoctorCliOptions {
   json?: boolean;
+  security?: boolean;
 }
 
 /**
@@ -138,6 +160,7 @@ interface RawMcpServerEntry {
   command?: unknown;
   args?: unknown;
   env?: unknown;
+  command_sha256?: unknown;
 }
 
 interface RawMcpFile {
@@ -169,6 +192,7 @@ function inspectMcpFile(workspaceRoot: string): DoctorReportMcp {
           name: '(parse)',
           command: '',
           commandOnPath: false,
+          command_sha256: null,
           ok: false,
           reason: `failed to parse .mcp.json: ${reason}`,
         },
@@ -186,6 +210,7 @@ function inspectMcpFile(workspaceRoot: string): DoctorReportMcp {
           name: '(schema)',
           command: '',
           commandOnPath: false,
+          command_sha256: null,
           ok: false,
           reason: '.mcp.json missing top-level "mcpServers" object',
         },
@@ -200,17 +225,20 @@ function inspectMcpFile(workspaceRoot: string): DoctorReportMcp {
         name,
         command: '',
         commandOnPath: false,
+        command_sha256: null,
         ok: false,
         reason: 'server entry is not an object',
       });
       continue;
     }
     const command = typeof entry.command === 'string' ? entry.command : '';
+    const checksum = typeof entry.command_sha256 === 'string' ? entry.command_sha256 : null;
     if (command.length === 0) {
       servers.push({
         name,
         command,
         commandOnPath: false,
+        command_sha256: checksum,
         ok: false,
         reason: 'missing or non-string "command" field',
       });
@@ -221,11 +249,29 @@ function inspectMcpFile(workspaceRoot: string): DoctorReportMcp {
       name,
       command,
       commandOnPath: onPath,
+      command_sha256: checksum,
       ok: true,
     });
   }
 
   return { file, found: true, servers };
+}
+
+/**
+ * Compute SHA256 of the file at `command` if it resolves to an existing file
+ * on disk. Returns null for bare commands (e.g. `node`) where there is no
+ * single binary to hash — callers treat that as "not verifiable".
+ */
+function hashCommandFile(command: string): string | null {
+  if (!command) return null;
+  if (!isAbsolute(command)) return null;
+  if (!existsSync(command)) return null;
+  try {
+    const bytes = readFileSync(command);
+    return createHash('sha256').update(bytes).digest('hex');
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -348,6 +394,116 @@ function resolveWorkspaceRoot(cwd: string, config: AgentOsConfig | null): string
   return isAbsolute(raw) ? raw : resolve(cwd, raw);
 }
 
+/**
+ * Build the `security` slice of the doctor report from the loaded config and
+ * the parsed `.mcp.json`. Returns null when no config was loaded — callers
+ * should treat that as "unknown posture" and refuse to claim ok.
+ */
+function buildSecurityReport(
+  config: AgentOsConfig | null,
+  mcp: DoctorReportMcp,
+): DoctorReportSecurity | null {
+  if (!config) return null;
+
+  const findings: string[] = [];
+  const mcpServers: DoctorReportMcpServerSecurity[] = [];
+
+  const pinned = config.security.pinned_mcp_servers;
+
+  for (const server of mcp.servers) {
+    // Skip synthetic entries used to report parse / schema failures — they
+    // are not real declared servers.
+    if (server.name.startsWith('(') && server.name.endsWith(')')) {
+      continue;
+    }
+    const hasChecksum =
+      typeof server.command_sha256 === 'string' && server.command_sha256.length > 0;
+    let checksumOk: boolean | null = null;
+    let reason: string | undefined;
+
+    if (hasChecksum) {
+      const actual = hashCommandFile(server.command);
+      if (actual === null) {
+        // Bare command (e.g. `node`) or missing file — cannot verify, but a
+        // checksum is declared. Report null (not verifiable).
+        checksumOk = null;
+      } else if (actual === server.command_sha256) {
+        checksumOk = true;
+      } else {
+        checksumOk = false;
+        reason = `command_sha256 mismatch (expected ${String(server.command_sha256)}, got ${actual})`;
+        findings.push(`mcp.${server.name}: ${reason}`);
+      }
+    }
+
+    if (pinned && !hasChecksum) {
+      reason = 'missing command_sha256 (pinned_mcp_servers=true)';
+      findings.push(`mcp.${server.name}: ${reason}`);
+    }
+
+    mcpServers.push({
+      name: server.name,
+      declared: true,
+      hasChecksum,
+      checksumOk,
+      reason,
+    });
+  }
+
+  const defaultPolicyOk = config.security.default_tool_policy === 'deny';
+  const destructiveOk = config.security.risk_levels.destructive === 'deny';
+  const shellOk = config.security.risk_levels.shell !== 'allow';
+  const pinnedOk = config.security.pinned_mcp_servers === true;
+  const redactOk = config.security.redact_secrets_in_logs === true;
+
+  if (!defaultPolicyOk) {
+    findings.push(
+      `security.default_tool_policy is "${config.security.default_tool_policy}" (expected "deny")`,
+    );
+  }
+  if (!destructiveOk) {
+    findings.push(
+      `security.risk_levels.destructive is "${config.security.risk_levels.destructive}" (expected "deny")`,
+    );
+  }
+  if (!shellOk) {
+    findings.push(
+      `security.risk_levels.shell is "${config.security.risk_levels.shell}" (expected "approval_required" or "deny")`,
+    );
+  }
+  if (!pinnedOk) {
+    findings.push('security.pinned_mcp_servers is false (expected true)');
+  }
+  if (!redactOk) {
+    findings.push('security.redact_secrets_in_logs is false (expected true)');
+  }
+
+  const mcpServersOk = mcpServers.every(
+    (s) => s.declared && (!pinned || s.hasChecksum) && s.checksumOk !== false,
+  );
+
+  const postureOk =
+    defaultPolicyOk && destructiveOk && shellOk && pinnedOk && redactOk && mcpServersOk;
+
+  const ok = findings.length === 0 && postureOk;
+
+  return {
+    default_tool_policy: config.security.default_tool_policy,
+    risk_levels: {
+      read: config.security.risk_levels.read,
+      write: config.security.risk_levels.write,
+      network: config.security.risk_levels.network,
+      shell: config.security.risk_levels.shell,
+      destructive: config.security.risk_levels.destructive,
+    },
+    pinned_mcp_servers: config.security.pinned_mcp_servers,
+    redact_secrets_in_logs: config.security.redact_secrets_in_logs,
+    mcpServers,
+    findings,
+    ok,
+  };
+}
+
 async function buildReport(cwd: string, env: NodeJS.ProcessEnv): Promise<DoctorReport> {
   const configPath = resolve(cwd, DEFAULT_CONFIG_FILENAME);
   let config: AgentOsConfig | null = null;
@@ -441,6 +597,8 @@ async function buildReport(cwd: string, env: NodeJS.ProcessEnv): Promise<DoctorR
   // ok rule: configFound && db.open. mcp.found contributes a warning only.
   const ok = configFound && db.open;
 
+  const security = buildSecurityReport(config, mcp);
+
   return {
     ok,
     workspace: { root: workspaceRoot, configPath, configFound },
@@ -449,6 +607,7 @@ async function buildReport(cwd: string, env: NodeJS.ProcessEnv): Promise<DoctorR
     mcp,
     db,
     versions,
+    security,
     warnings,
   };
 }
@@ -544,14 +703,82 @@ function formatPretty(report: DoctorReport): string {
   return lines.join('\n') + '\n';
 }
 
+/**
+ * Render the security subset of the report — used by `doctor --security`.
+ * Mirrors the layout documented in PRD §3 Phase 12 (security hardening).
+ */
+function formatSecurityPretty(security: DoctorReportSecurity | null): string {
+  const lines: string[] = [];
+  lines.push('agent-os doctor --security');
+  lines.push('');
+
+  if (!security) {
+    lines.push('(no config loaded — cannot assess security posture)');
+    lines.push('');
+    lines.push('status: FAIL');
+    return lines.join('\n') + '\n';
+  }
+
+  lines.push('defaults');
+  lines.push(`  default_tool_policy: ${security.default_tool_policy}`);
+  lines.push(`  risk_levels.destructive: ${security.risk_levels.destructive}`);
+  lines.push(`  risk_levels.shell: ${security.risk_levels.shell}`);
+  lines.push(`  pinned_mcp_servers: ${security.pinned_mcp_servers}`);
+  lines.push(`  redact_secrets_in_logs: ${security.redact_secrets_in_logs}`);
+  lines.push('');
+
+  lines.push('mcp servers');
+  if (security.mcpServers.length === 0) {
+    lines.push('  (none declared)');
+  } else {
+    for (const s of security.mcpServers) {
+      if (s.checksumOk === false) {
+        lines.push(`  ${s.name}: CHECKSUM MISMATCH`);
+      } else if (!s.hasChecksum) {
+        lines.push(`  ${s.name}: UNPINNED`);
+      } else if (s.checksumOk === true) {
+        lines.push(`  ${s.name}: pinned (sha256 ok)`);
+      } else {
+        // hasChecksum && checksumOk === null — declared but unverifiable
+        // (e.g. bare command like `node`).
+        lines.push(`  ${s.name}: pinned (sha256 not verifiable)`);
+      }
+    }
+  }
+  lines.push('');
+
+  if (security.findings.length > 0) {
+    lines.push('findings');
+    for (const f of security.findings) lines.push(`  - ${f}`);
+    lines.push('');
+  }
+
+  lines.push(`status: ${security.ok ? 'OK' : 'FAIL'}`);
+  return lines.join('\n') + '\n';
+}
+
 export function buildDoctorCommand(): Command {
   const cmd = new Command('doctor');
   cmd
     .description('Run a health check covering config, providers, MCP, and the local database')
     .option('--json', 'Emit a machine-readable JSON report', false)
+    .option('--security', 'Emit only the security subset of the report', false)
     .action(async (options: DoctorCliOptions) => {
       try {
         const report = await buildReport(process.cwd(), process.env);
+
+        if (options.security) {
+          if (options.json) {
+            process.stdout.write(JSON.stringify(report.security) + '\n');
+          } else {
+            process.stdout.write(formatSecurityPretty(report.security));
+          }
+          if (!report.security || !report.security.ok) {
+            process.exit(1);
+          }
+          return;
+        }
+
         if (options.json) {
           process.stdout.write(JSON.stringify(report) + '\n');
         } else {

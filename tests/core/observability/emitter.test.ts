@@ -145,6 +145,35 @@ describe('createSpanEmitter — persistence', () => {
     expect(exported).toEqual([ctx.spanId]);
   });
 
+  it('exporter receives scrubbed span attributes (PRD §2.5 secret_patterns)', async () => {
+    const exportedAttrs: Record<string, unknown>[] = [];
+    const exportedEventAttrs: Record<string, unknown>[] = [];
+    const exporter: SpanExporter = {
+      async export(spans) {
+        for (const s of spans) {
+          exportedAttrs.push(s.attributes);
+          for (const evt of s.events) exportedEventAttrs.push(evt.attributes);
+        }
+      },
+    };
+    const emitter = createSpanEmitter({
+      db: h.db,
+      exporter,
+      secretPatterns: ['SECRET_[A-Z0-9]+'],
+    });
+    const ctx = emitter.start({
+      kind: 'tool_call',
+      name: 'tool:scrub',
+      runId: 'run-scrub',
+      attributes: { note: 'leaks SECRET_ABC123 here' },
+    });
+    emitter.recordEvent(ctx, 'evt', { also: 'SECRET_XYZ999' });
+    emitter.end(ctx, 'ok');
+    await emitter.flush();
+    expect(exportedAttrs[0]!.note).toBe('leaks <redacted> here');
+    expect(exportedEventAttrs[0]!.also).toBe('<redacted>');
+  });
+
   it('swallows exporter errors via errorLogger', async () => {
     const logged: { msg: string; err: unknown }[] = [];
     const exporter: SpanExporter = {

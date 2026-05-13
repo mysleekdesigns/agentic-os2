@@ -85,11 +85,13 @@ export function createObservabilityFromConfig(
     }
   }
 
+  const secretPatterns = config.security.secret_patterns;
   const emitter = createSpanEmitter({
     db,
     ...(exporter ? { exporter } : {}),
     ...(options.clock ? { clock: options.clock } : {}),
     ...(options.errorLogger ? { errorLogger: options.errorLogger } : {}),
+    ...(secretPatterns && secretPatterns.length > 0 ? { secretPatterns } : {}),
   });
 
   return { emitter, ...(exporter ? { exporter } : {}) };

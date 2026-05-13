@@ -44,6 +44,12 @@ export interface SpanEmitterOptions {
   clock?: () => number;
   /** Where to send swallowed errors. Defaults to a silent sink. */
   errorLogger?: (msg: string, err: unknown) => void;
+  /**
+   * Phase 12 — operator-supplied regex source strings from
+   * `security.secret_patterns`. Matched substrings in persisted span
+   * attributes / event attributes are replaced with `<redacted>`.
+   */
+  secretPatterns?: readonly string[];
 }
 
 export interface StartArgs {
@@ -99,6 +105,8 @@ export function createSpanEmitter(opts: SpanEmitterOptions): SpanEmitter {
   const log: (msg: string, err: unknown) => void = opts.errorLogger ?? (() => undefined);
   const live = new Map<string, SpanRecord>();
   const pendingExports: Promise<unknown>[] = [];
+  const extraPatterns = opts.secretPatterns;
+  const redactOpts = extraPatterns && extraPatterns.length > 0 ? { extraPatterns } : undefined;
 
   const persist = (span: SpanRecord): void => {
     try {
@@ -107,10 +115,16 @@ export function createSpanEmitter(opts: SpanEmitterOptions): SpanEmitter {
       // sanitize on the way to disk so a leaked env-var key value never
       // surfaces in `traces.otel_span_json`. Events carry their own
       // attribute bag, so each one gets the same treatment.
-      const scrubbedAttrs = redactSecretValues(span.attributes) as Record<string, AttributeValue>;
+      const scrubbedAttrs = redactSecretValues(span.attributes, redactOpts) as Record<
+        string,
+        AttributeValue
+      >;
       const scrubbedEvents = span.events.map((evt) => ({
         ...evt,
-        attributes: redactSecretValues(evt.attributes) as Record<string, AttributeValue>,
+        attributes: redactSecretValues(evt.attributes, redactOpts) as Record<
+          string,
+          AttributeValue
+        >,
       }));
       const payload: PersistedSpan = {
         context: span.ctx,
@@ -140,7 +154,25 @@ export function createSpanEmitter(opts: SpanEmitterOptions): SpanEmitter {
     }
     if (opts.exporter) {
       try {
-        const p = Promise.resolve(opts.exporter.export([span])).catch((err) => {
+        // Hand the exporter the scrubbed view so OTLP egress honours the same
+        // `secret_patterns` allow-list as the SQLite copy. Without this, a
+        // collector would receive raw `span.attributes` (and `events`) even
+        // though the persisted JSON is clean — see PRD §2.5 / Phase 12.
+        const scrubbedSpan: SpanRecord = {
+          ...span,
+          attributes: redactSecretValues(span.attributes, redactOpts) as Record<
+            string,
+            AttributeValue
+          >,
+          events: span.events.map((evt) => ({
+            ...evt,
+            attributes: redactSecretValues(evt.attributes, redactOpts) as Record<
+              string,
+              AttributeValue
+            >,
+          })),
+        };
+        const p = Promise.resolve(opts.exporter.export([scrubbedSpan])).catch((err) => {
           log(`observability: exporter failed for span ${span.ctx.spanId}`, err);
         });
         pendingExports.push(p);
