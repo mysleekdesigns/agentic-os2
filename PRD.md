@@ -937,13 +937,13 @@ starter agents already carry `eval.success_criteria` in frontmatter).
 
 ---
 
-### Phase 10 — CLI developer interface
+### Phase 10 — CLI developer interface ✅ COMPLETE (2026-05-12)
 
 **Outcome**: A single ergonomic CLI that fronts every subsystem; safe to
 invoke from Claude Code conversations.
 
-- [ ] Choose CLI framework (commander.js or oclif).
-- [ ] Implement top-level commands:
+- [x] Choose CLI framework (commander.js or oclif).
+- [x] Implement top-level commands:
       `init`, `agent {list,show,new}`, `workflow {list,run,resume,show}`,
       `approvals {list,approve,reject,revise}`,
       `memory {list,show,write,rm,search}`,
@@ -951,13 +951,34 @@ invoke from Claude Code conversations.
       `run`, `logs`, `eval {run,diff}`,
       `provider {list,enable}`,
       `doctor` (health check), `version`.
-- [ ] Friendly TTY output + `--json` everywhere for programmatic use.
-- [ ] Ship `.claude/commands/*.md` slash commands that wrap common flows
+- [x] Friendly TTY output + `--json` everywhere for programmatic use.
+- [x] Ship `.claude/commands/*.md` slash commands that wrap common flows
       (`/agent-run`, `/workflow-run`, `/approvals`, `/memory`).
-- [ ] Make every command help-discoverable from inside Claude Code.
+- [x] Make every command help-discoverable from inside Claude Code.
 
-**Exit**: A new user runs `agent-os doctor` and sees their config, provider
-status, MCP server health, and DB version.
+**Exit (met)**: `agent-os doctor` now reports workspace config, provider
+status (enabled flag + capability matrix + api-key presence + factory
+registration), MCP server health (each `.mcp.json` entry's `command`
+checked against `$PATH`), database state (open + applied migration count
+
+- last migration id), and version. `agent-os version` mirrors that with
+  `--json`. New top-level groups `tools {list,test}` and
+  `provider {list,enable}` shipped; `agent new <id>` scaffolds a canonical
+  file + `.claude/agents/` mirror + starter eval fixture. Every command has
+  `--json`. New slash wrappers `/doctor`, `/agent-run`, `/agent-new`,
+  `/tools-list`, `/tools-test`, `/provider-list`, `/provider-enable`,
+  `/approvals`, `/memory` land under `.claude/commands/`. 497 tests pass
+  (20 new across `tests/cli/{agent-new,tools,provider,doctor,version}.test.ts`);
+  typecheck + lint clean; `verify-no-api-key` PASS with
+  `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`CLAUDE_API_KEY` unset. No auditor
+  maps to this surface (CLI is a thin wrapper layer per Step 2 rules).
+
+**Artifacts shipped**: `src/cli/commands/{tools,provider,doctor,version}.ts`;
+`agent new` subcommand added to `src/cli/commands/agent.ts`;
+`src/cli/index.ts` rewired; `.claude/commands/{doctor,agent-run,agent-new,
+tools-list,tools-test,provider-list,provider-enable,approvals,memory}.md`;
+tests `tests/cli/{agent-new,tools,provider,doctor,version}.test.ts`
+(20 new tests).
 
 ---
 

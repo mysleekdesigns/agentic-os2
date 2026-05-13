@@ -12,6 +12,10 @@ import { buildWorkflowCommand } from './commands/workflow.js';
 import { buildShowCommand } from './commands/show.js';
 import { buildLogsCommand } from './commands/logs.js';
 import { buildEvalCommand } from './commands/eval.js';
+import { buildToolsCommand } from './commands/tools.js';
+import { buildProviderCommand } from './commands/provider.js';
+import { buildDoctorCommand } from './commands/doctor.js';
+import { buildVersionCommand } from './commands/version.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,13 +42,8 @@ export function buildProgram(): Command {
     .description('Agent OS — local-first developer operating layer for AI agents')
     .version(VERSION, '-v, --version', 'output the current version');
 
-  program
-    .command('doctor')
-    .description('Run a basic health check')
-    .action(() => {
-      process.stdout.write('agent-os: ok\n');
-    });
-
+  program.addCommand(buildDoctorCommand());
+  program.addCommand(buildVersionCommand());
   program.addCommand(buildInitCommand());
   program.addCommand(buildAgentCommand());
   program.addCommand(buildRunCommand());
@@ -54,6 +53,8 @@ export function buildProgram(): Command {
   program.addCommand(buildShowCommand());
   program.addCommand(buildLogsCommand());
   program.addCommand(buildEvalCommand());
+  program.addCommand(buildToolsCommand());
+  program.addCommand(buildProviderCommand());
 
   return program;
 }
