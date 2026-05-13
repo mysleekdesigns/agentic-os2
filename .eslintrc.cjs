@@ -22,5 +22,6 @@ module.exports = {
     'tests',
     'vitest.config.ts',
     'drizzle.config.ts',
+    'web',
   ],
 };

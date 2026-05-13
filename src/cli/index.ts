@@ -14,6 +14,7 @@ import { buildLogsCommand } from './commands/logs.js';
 import { buildEvalCommand } from './commands/eval.js';
 import { buildToolsCommand } from './commands/tools.js';
 import { buildProviderCommand } from './commands/provider.js';
+import { buildDashboardCommand } from './commands/dashboard.js';
 import { buildDoctorCommand } from './commands/doctor.js';
 import { buildVersionCommand } from './commands/version.js';
 
@@ -55,6 +56,7 @@ export function buildProgram(): Command {
   program.addCommand(buildEvalCommand());
   program.addCommand(buildToolsCommand());
   program.addCommand(buildProviderCommand());
+  program.addCommand(buildDashboardCommand());
 
   return program;
 }

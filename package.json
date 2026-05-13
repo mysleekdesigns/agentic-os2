@@ -9,6 +9,9 @@
   "engines": {
     "node": ">=20"
   },
+  "workspaces": [
+    "web"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/cli/index.ts",

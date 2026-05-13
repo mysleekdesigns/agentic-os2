@@ -1135,19 +1135,34 @@ script), `README.md` (CI badge), `.eslintrc.cjs` (ignore `coverage/`),
 
 ---
 
-### Phase 15 — Optional web dashboard
+### Phase 15 — Optional web dashboard ✅ COMPLETE (2026-05-12)
 
 **Outcome (optional, behind a flag)**: A local web UI that mirrors the CLI for
 runs, approvals, memory, and evals.
 
-- [ ] Next.js app in `web/`, Tailwind + shadcn/ui, reads same SQLite DB.
-- [ ] Pages: runs list & detail, approvals queue, memory browser, eval results.
-- [ ] Auth: local-only by default (bound to `127.0.0.1`); auth required if
+- [x] Next.js app in `web/`, Tailwind + shadcn/ui, reads same SQLite DB.
+- [x] Pages: runs list & detail, approvals queue, memory browser, eval results.
+- [x] Auth: local-only by default (bound to `127.0.0.1`); auth required if
       bound to anything else.
-- [ ] Started/stopped by `agent-os dashboard {start,stop}`.
+- [x] Started/stopped by `agent-os dashboard {start,stop}`.
 
-**Exit**: Dashboard ships behind `--with-dashboard`; not required for any
-core flow.
+**Exit (met)**: Dashboard ships as an opt-in npm workspace at `web/` (Next.js
+15 + Tailwind 3 + hand-rolled shadcn-style primitives — no shadcn-CLI
+dependency) and is reachable only through `agent-os dashboard start` / `stop`.
+`npm run --workspace=@agent-os/web build` compiles 5 routes (`/`,
+`/runs`, `/runs/[id]`, `/approvals`, `/memory`, `/evals`). Middleware
+allows loopback bind unauthenticated and requires `AGENT_OS_DASHBOARD_TOKEN`
+bearer auth for any non-loopback host. Root `npm test` is 74 files / 611
+tests (+17: 7 dashboard CLI tests, 10 web-auth tests). No applicable
+auditor subagents.
+
+**Artifacts shipped**: `web/` workspace (package.json, tsconfig, next.config,
+tailwind/postcss, layout + index, 5 content pages, UI primitives,
+`lib/{cn,db,format,auth}.ts`, `middleware.ts`, `README.md`),
+`src/cli/commands/dashboard.ts`, `src/cli/index.ts` (wiring),
+`.claude/commands/{dashboard-start,dashboard-stop}.md`,
+`tests/cli/dashboard.test.ts`, `tests/web-auth.test.ts`, root `package.json`
+(`workspaces: ["web"]`), `.eslintrc.cjs` (ignore `web`).
 
 ---
 
